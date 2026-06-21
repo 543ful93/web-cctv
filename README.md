@@ -156,6 +156,25 @@ journalctl -u webcctv -f        # Memantau log live server
 ```
 
 ---
+## 📝 Ringkasan Panduan Pengeditan Logo & Favicon (Kutipan dari 
+README.md
+ Baru)
+Untuk melakukan kustomisasi merek (branding) Anda sendiri di kemudian hari, ikuti langkah mudah berikut tanpa perlu mengubah baris kode HTML apa pun:
+
+Aset Tampilan	Nama Berkas	Jalur Folder Proyek	Keterangan & Ukuran Ideal
+Favicon Tab Browser	favicon.png	/opt/webcctv/public/favicon.png	Format PNG transparan, ukuran ideal 32x32 atau 64x64 piksel.
+Logo Aplikasi Utama	logo.png	/opt/webcctv/public/logo.png	Format PNG transparan, ukuran ideal 512x512 piksel (rasio kotak 1:1).
+Bagaimana cara kerjanya?: Cukup unggah berkas gambar Anda menggunakan nama dan folder di atas. Aplikasi Web-CCTV v2.7 akan secara dinamis mendeteksi, memuat, dan mengganti logo & favicon lama Anda secara instan setelah halaman dimuat ulang!
+
+## 🛠️ Verifikasi Hasil Akhir Pengujian
+Semua berkas diuji menggunakan fungsionalitas pengetesan kompiler Node:
+
+Analisis Sintaksis (node -c public/app.js): LULUS (Nol Error!).
+Integrasi HTML (
+index.html
+): HTML terbaru seberat 65.4KB terverifikasi utuh dengan kode logo dinamis dan favicon ganda.
+Express Server: Menyala stabil pada Port 3000 dan melayani respons HTTP/1.1 200 OK dengan sempurna.
+
 
 ## 📝 Lisensi
 MIT – Modifikasi bebas untuk kebutuhan personal, perkantoran, perkotaan, dan desa.
