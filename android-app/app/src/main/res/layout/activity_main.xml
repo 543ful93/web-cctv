@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#090d16"> <!-- Dark Theme -->
+
+    <!-- Web-CCTV SPA Container -->
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Setup Form (Hanya muncul saat klik konfigurasi ulang / pertama berjalan) -->
+    <LinearLayout
+        android:id="@+id/setupLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="visible">
+
+        <ImageView
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:src="@android:drawable/ic_menu_camera"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Web-CCTV Setup"
+            android:textColor="#ffffff"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="24dp"/>
+
+        <EditText
+            android:id="@+id/inputLocalIp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@android:drawable/editbox_background"
+            android:hint="Alamat Lokal (e.g. http://192.168.1.18:3000)"
+            android:inputType="textUri"
+            android:padding="12dp"
+            android:layout_marginBottom="12dp"
+            android:textSize="14sp"/>
+
+        <EditText
+            android:id="@+id/inputCloudDomain"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@android:drawable/editbox_background"
+            android:hint="Cloudflare Domain (e.g. https://cctv.anda.com)"
+            android:inputType="textUri"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp"
+            android:textSize="14sp"/>
+
+        <Button
+            android:id="@+id/btnSave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:backgroundTint="#2563eb"
+            android:text="SIMPAN & HUBUNGKAN"
+            android:textColor="#ffffff"
+            android:textStyle="bold"
+            android:padding="12dp" />
+    </LinearLayout>
+</RelativeLayout>

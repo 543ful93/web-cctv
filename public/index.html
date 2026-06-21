@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="id" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Web-CCTV</title>
+  
+  <!-- Browser Favicon Configuration (Custom PNG + Inline SVG Fallback) -->
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📹</text></svg>">
+  
+  <!-- CDNs for styling, icons, mapping, and HLS streaming -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="flex flex-col h-full overflow-hidden font-sans select-none antialiased">
+
+  <!-- Running Ticker at the top -->
+  <div id="ticker-bar" class="bg-blue-600 text-white text-xs py-1 px-4 overflow-hidden relative whitespace-nowrap z-50 h-6 flex items-center">
+    <div id="ticker-text" class="inline-block animate-marquee"></div>
+  </div>
+
+  <!-- App Wrapper (Hidden when loading / logged out) -->
+  <div id="app-container" class="hidden flex flex-col md:flex-row flex-1 overflow-hidden relative">
+    
+    <!-- Mobile Top Bar (Only visible on mobile screens) -->
+    <header class="md:hidden flex items-center justify-between h-14 bg-slate-900 border-b border-slate-800 px-4 flex-shrink-0 z-30 w-full">
+      <div class="flex items-center space-x-3">
+        <button onclick="toggleMobileSidebar()" class="text-slate-300 hover:text-white focus:outline-none p-1.5 rounded-lg active:bg-slate-800 transition">
+          <i class="fa-solid fa-bars text-lg"></i>
+        </button>
+        <div class="flex items-center space-x-2.5">
+          <!-- Customizable Mobile Logo with default icon fallback -->
+          <div class="relative flex items-center justify-center">
+            <img id="mobile-app-logo-img" src="/logo.png" class="w-7 h-7 rounded-md object-contain" onerror="this.style.display='none'; document.getElementById('mobile-app-logo-fallback').classList.remove('hidden')">
+            <div id="mobile-app-logo-fallback" class="hidden bg-blue-600 text-white p-1.5 rounded-md flex items-center justify-center">
+              <i class="fa-solid fa-video text-xs"></i>
+            </div>
+          </div>
+          <div>
+            <span id="mobile-app-title" class="font-bold text-base leading-tight">Web-CCTV</span>
+            <span id="mobile-app-sub" class="text-[10px] text-slate-400 block -mt-0.5">HG680P</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Language Switcher in Mobile Top Bar -->
+      <div class="flex items-center space-x-1 bg-slate-950 p-1 rounded-md text-[10px] border border-slate-800">
+        <button id="mobile-lang-id-btn" class="px-2 py-0.5 rounded transition font-medium text-blue-400 bg-slate-800" onclick="setLanguage('id')">ID</button>
+        <button id="mobile-lang-en-btn" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200" onclick="setLanguage('en')">EN</button>
+      </div>
+    </header>
+
+    <!-- Sidebar Backdrop overlay for Mobile -->
+    <div id="sidebar-backdrop" onclick="toggleMobileSidebar()" class="fixed inset-0 bg-black/70 z-40 hidden transition-opacity duration-300 opacity-0 md:hidden pointer-events-none"></div>
+    
+    <!-- Sidebar Navigation Drawer (Sliding on mobile, static on desktop) -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 w-64 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-50 transform -translate-x-full md:translate-x-0 md:static transition-transform duration-300 ease-in-out h-full">
+      <!-- Sidebar Header -->
+      <div class="p-4 flex items-center justify-between border-b border-slate-800">
+        <div class="flex items-center space-x-3">
+          <!-- Customizable Sidebar Logo with default icon fallback -->
+          <div class="relative flex items-center justify-center">
+            <img id="app-logo-img" src="/logo.png" class="w-9 h-9 rounded-lg object-contain" onerror="this.style.display='none'; document.getElementById('app-logo-fallback').classList.remove('hidden')">
+            <div id="app-logo-fallback" class="hidden bg-blue-600 text-white p-2 rounded-lg flex items-center justify-center">
+              <i class="fa-solid fa-video text-lg"></i>
+            </div>
+          </div>
+          <div>
+            <h1 id="app-title-name" class="font-bold text-lg leading-tight">Web-CCTV</h1>
+            <span id="app-title-sub" class="text-xs text-slate-400">HG680P</span>
+          </div>
+        </div>
+        
+        <!-- Close Menu Button (Mobile Only) -->
+        <button onclick="toggleMobileSidebar()" class="md:hidden text-slate-400 hover:text-white p-1 rounded-lg active:bg-slate-800">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <!-- Navigation Menu -->
+      <nav id="nav-menu" class="flex-1 flex flex-col p-3 space-y-1 overflow-y-auto">
+        <button data-view="dashboard" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-chart-line w-5 text-center"></i>
+          <span data-i18n="menu_dashboard">Dasbor</span>
+        </button>
+        <button data-view="live" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-tv w-5 text-center"></i>
+          <span data-i18n="menu_live">Live CCTV</span>
+        </button>
+        <button data-view="map" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-map-location-dot w-5 text-center"></i>
+          <span data-i18n="menu_map">Peta Lokasi</span>
+        </button>
+        <button data-view="records" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-compact-disc w-5 text-center"></i>
+          <span data-i18n="menu_records">Rekaman</span>
+        </button>
+        <!-- Admin only links -->
+        <button data-view="cameras" class="nav-item admin-only hidden flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-camera w-5 text-center"></i>
+          <span data-i18n="menu_cameras">Kelola Kamera</span>
+        </button>
+        <button data-view="users" class="nav-item admin-only hidden flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-users w-5 text-center"></i>
+          <span data-i18n="menu_users">Kelola User</span>
+        </button>
+        <button data-view="settings" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+          <i class="fa-solid fa-sliders w-5 text-center"></i>
+          <span data-i18n="menu_settings">Pengaturan</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer (User details and Logout) -->
+      <div class="p-4 border-t border-slate-800 bg-slate-950 flex flex-col space-y-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+            <i class="fa-solid fa-user text-slate-300"></i>
+          </div>
+          <div class="overflow-hidden">
+            <h4 id="user-display-name" class="font-semibold text-sm truncate">User</h4>
+            <span id="user-display-role" class="text-xs text-slate-400 capitalize">Role</span>
+          </div>
+        </div>
+        <button onclick="handleLogout()" class="w-full flex items-center justify-center space-x-2 bg-slate-800 hover:bg-red-900 hover:text-white text-red-400 py-2 rounded-lg text-sm font-semibold transition border border-slate-700 hover:border-red-800">
+          <i class="fa-solid fa-right-from-bracket"></i>
+          <span data-i18n="logout">Keluar</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-slate-950 relative">
+      
+      <!-- Current View Content Container -->
+      <div class="flex-1 overflow-y-auto p-4 md:p-6" id="view-container">
+
+        <!-- ================= VIEW: DASHBOARD ================= -->
+        <section id="view-dashboard" class="view-section hidden space-y-6">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
+            <div>
+              <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="dash_welcome">Dasbor Pemantauan</h2>
+              <p class="text-slate-400 text-xs md:text-sm" data-i18n="dash_sub">Statistik real-time sistem dan status koneksi kamera CCTV.</p>
+            </div>
+            <div id="dash-clock" class="text-xs md:text-sm font-mono text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center space-x-2 self-start md:self-auto flex-shrink-0">
+              <i class="fa-solid fa-clock text-blue-500"></i>
+              <span>--:--:--</span>
+            </div>
+          </div>
+
+          <!-- Stats Grid -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4">
+              <div class="p-2 md:p-3 bg-blue-500/10 text-blue-500 rounded-lg">
+                <i class="fa-solid fa-video text-lg md:text-xl w-5 md:w-6 text-center"></i>
+              </div>
+              <div>
+                <span class="text-[10px] md:text-xs text-slate-400 block" data-i18n="stat_total_cams">Total Kamera</span>
+                <span id="stat-total-cams" class="text-lg md:text-2xl font-bold">0</span>
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4">
+              <div class="p-2 md:p-3 bg-emerald-500/10 text-emerald-500 rounded-lg">
+                <i class="fa-solid fa-circle-check text-lg md:text-xl w-5 md:w-6 text-center"></i>
+              </div>
+              <div>
+                <span class="text-[10px] md:text-xs text-slate-400 block" data-i18n="stat_online">Online</span>
+                <span id="stat-online-cams" class="text-lg md:text-2xl font-bold text-emerald-500">0</span>
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4">
+              <div class="p-2 md:p-3 bg-red-500/10 text-red-500 rounded-lg">
+                <i class="fa-solid fa-circle-xmark text-lg md:text-xl w-5 md:w-6 text-center animate-pulse"></i>
+              </div>
+              <div>
+                <span class="text-[10px] md:text-xs text-slate-400 block" data-i18n="stat_offline">Offline</span>
+                <span id="stat-offline-cams" class="text-lg md:text-2xl font-bold text-red-500">0</span>
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4">
+              <div class="p-2 md:p-3 bg-purple-500/10 text-purple-500 rounded-lg">
+                <i class="fa-solid fa-tower-broadcast text-lg md:text-xl w-5 md:w-6 text-center"></i>
+              </div>
+              <div>
+                <span class="text-[10px] md:text-xs text-slate-400 block" data-i18n="stat_streaming">Transcode Aktif</span>
+                <span id="stat-streaming-now" class="text-lg md:text-2xl font-bold text-purple-400">0</span>
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4">
+              <div class="p-2 md:p-3 bg-rose-500/10 text-rose-500 rounded-lg">
+                <i class="fa-solid fa-record-vinyl text-lg md:text-xl w-5 md:w-6 text-center animate-pulse"></i>
+              </div>
+              <div>
+                <span class="text-[10px] md:text-xs text-slate-400 block" data-i18n="stat_recording">Perekaman Aktif</span>
+                <span id="stat-recording-now" class="text-lg md:text-2xl font-bold text-rose-500">0</span>
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4">
+              <div class="p-2 md:p-3 bg-amber-500/10 text-amber-500 rounded-lg">
+                <i class="fa-solid fa-database text-lg md:text-xl w-5 md:w-6 text-center"></i>
+              </div>
+              <div>
+                <span class="text-[10px] md:text-xs text-slate-400 block" data-i18n="stat_records_size">Penyimpanan</span>
+                <span id="stat-records-size" class="text-lg md:text-2xl font-bold">0 MB</span>
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl flex items-center space-x-3 md:space-x-4 col-span-2">
+              <div class="p-2 md:p-3 bg-slate-500/10 text-slate-400 rounded-lg">
+                <i class="fa-solid fa-server text-lg md:text-xl w-5 md:w-6 text-center"></i>
+              </div>
+              <div class="flex-1 grid grid-cols-2 gap-2 text-[10px] md:text-xs">
+                <div>
+                  <span class="text-slate-400 block font-semibold" data-i18n="stat_host">Platform</span>
+                  <span class="font-bold text-slate-200 truncate block">HG680P</span>
+                </div>
+                <div>
+                  <span class="text-slate-400 block font-semibold" data-i18n="stat_status">Status Layanan</span>
+                  <span class="font-semibold text-emerald-500 flex items-center space-x-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                    <span>Running</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Dashboard Sections -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 flex flex-col space-y-4">
+              <h3 class="font-bold text-base md:text-lg border-b border-slate-800 pb-2 text-slate-200" data-i18n="dash_quick_status">Status Deteksi Koneksi Kamera</h3>
+              <div id="dash-cams-status-list" class="divide-y divide-slate-800 overflow-y-auto max-h-96 pr-2 space-y-1">
+                <div class="text-slate-500 text-sm py-4 text-center" data-i18n="loading">Memuat...</div>
+              </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 flex flex-col space-y-4 text-xs md:text-sm text-slate-300">
+              <h3 class="font-bold text-base md:text-lg text-white border-b border-slate-800 pb-2" data-i18n="dash_sys_info">Spesifikasi & Informasi</h3>
+              <ul class="space-y-3">
+                <li class="flex justify-between border-b border-slate-800 pb-1.5">
+                  <span class="text-slate-400">NodeJS</span>
+                  <span class="font-mono">v18 / v20</span>
+                </li>
+                <li class="flex justify-between border-b border-slate-800 pb-1.5">
+                  <span class="text-slate-400" data-i18n="sys_db">Database</span>
+                  <span class="font-semibold text-slate-200">SQLite (WAL Mode)</span>
+                </li>
+                <li class="flex justify-between border-b border-slate-800 pb-1.5">
+                  <span class="text-slate-400">FFmpeg Transcoder</span>
+                  <span class="text-blue-400 font-semibold">libx264 Ultrafast</span>
+                </li>
+                <li class="flex justify-between">
+                  <span class="text-slate-400" data-i18n="sys_resolution">Resolusi Default</span>
+                  <span>960x540 @15fps</span>
+                </li>
+              </ul>
+              <div class="bg-blue-950/40 border border-blue-900/50 p-3 rounded-lg text-[10px] md:text-xs leading-relaxed text-blue-300">
+                <i class="fa-solid fa-circle-info mr-1 text-blue-400"></i>
+                <span data-i18n="dash_sys_hint">Gunakan RTSP Transcode hanya untuk kamera aktif di browser. Gunakan HLS direct (.m3u8) atau YouTube Live Embed untuk menghemat beban CPU STB Anda secara dramatis.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VIEW: LIVE CCTV GRID ================= -->
+        <section id="view-live" class="view-section hidden space-y-4">
+          <!-- Filters Toolbar -->
+          <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl shadow-lg">
+            <div class="flex flex-1 flex-col sm:flex-row gap-3">
+              <div class="relative flex-1">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input type="text" id="live-search" class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder-slate-500" placeholder="Cari nama kamera atau lokasi..." data-i18n-placeholder="search_placeholder">
+              </div>
+              <div class="relative w-full sm:w-48">
+                <select id="live-filter-location" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition appearance-none cursor-pointer">
+                  <option value="" data-i18n="all_locations">Semua Lokasi</option>
+                </select>
+                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between sm:justify-start space-x-4 bg-slate-950 border border-slate-800 px-4 py-2 rounded-lg flex-shrink-0">
+              <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-circle-play text-red-500 text-xs animate-ping"></i>
+                <span class="text-xs md:text-sm font-semibold text-slate-300" data-i18n="live_in_grid">Live di Grid</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="live-grid-toggle" class="sr-only peer" onchange="toggleLiveInGrid(this)">
+                <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+              </label>
+            </div>
+          </div>
+
+          <div id="live-cameras-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6"></div>
+        </section>
+
+        <!-- ================= VIEW: MAP ================= -->
+        <section id="view-map" class="view-section hidden space-y-4">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between space-y-1 md:space-y-0 flex-shrink-0">
+            <div>
+              <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="map_title">Peta Kamera</h2>
+              <p class="text-slate-400 text-xs md:text-sm" data-i18n="map_sub">Menampilkan lokasi geografis kamera CCTV beserta status terbarunya.</p>
+            </div>
+            <div class="flex items-center space-x-3 text-[10px] md:text-xs bg-slate-900 border border-slate-800 p-2 rounded-lg self-start md:self-auto flex-shrink-0">
+              <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span><span data-i18n="online">Online</span></span>
+              <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span><span data-i18n="offline">Offline</span></span>
+              <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span><span data-i18n="unknown">Tidak Diketahui</span></span>
+            </div>
+          </div>
+
+          <!-- Grid Layout -->
+          <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col h-[400px] lg:h-[500px]">
+              <div class="mb-3">
+                <h3 class="font-bold text-sm text-slate-200 mb-2 flex items-center justify-between">
+                  <span data-i18n="camera_list_title">Daftar Kamera</span>
+                  <i class="fa-solid fa-video text-slate-500 text-xs"></i>
+                </h3>
+                <div class="relative">
+                  <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                  <input type="text" id="map-search" class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 transition placeholder-slate-500" placeholder="Cari kamera..." data-i18n-placeholder="search_placeholder_map">
+                </div>
+              </div>
+              <div id="map-cameras-list" class="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-none">
+                <div class="text-slate-500 text-xs py-4 text-center" data-i18n="loading">Memuat kamera...</div>
+              </div>
+            </div>
+
+            <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden h-[400px] lg:h-[500px] relative z-10">
+              <div id="map" class="w-full h-full"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VIEW: RECORDINGS ================= -->
+        <section id="view-records" class="view-section hidden space-y-6">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
+            <div>
+              <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="records_title">File Rekaman MP4</h2>
+              <p class="text-slate-400 text-xs md:text-sm" data-i18n="records_sub">Unduh atau tonton rekaman terjadwal dan manual kamera CCTV.</p>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-3 self-start md:self-auto w-full md:w-auto mt-2 md:mt-0">
+              <!-- Trigger manual record form button -->
+              <button id="btn-show-rec-form" onclick="toggleManualRecordForm()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 border-0 shadow-lg shadow-red-500/10 cursor-pointer">
+                <i class="fa-solid fa-circle"></i>
+                <span>Record Manual</span>
+              </button>
+              
+              <!-- Camera filter for records -->
+              <div class="relative w-full sm:w-40">
+                <select id="records-filter-camera" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer" onchange="loadRecords()">
+                  <option value="" data-i18n="all_cameras">Semua Kamera</option>
+                </select>
+                <i class="fa-solid fa-chevron-down absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-[10px]"></i>
+              </div>
+              
+              <!-- Date filter -->
+              <div class="relative w-full sm:w-36">
+                <input type="date" id="records-filter-date" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer" onchange="loadRecords()">
+              </div>
+              
+              <!-- Time filter -->
+              <div class="relative w-full sm:w-28">
+                <input type="time" id="records-filter-time" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer" onchange="loadRecords()">
+              </div>
+
+              <!-- Reset filters button -->
+              <button onclick="resetRecordsFilters()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition border border-slate-700 cursor-pointer">
+                <i class="fa-solid fa-rotate-left"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Hard Disk Storage status panel -->
+          <div id="storage-status-panel" class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg space-y-3">
+            <div class="flex justify-between items-center flex-wrap gap-2">
+              <h3 class="font-bold text-sm text-slate-200 flex items-center space-x-2">
+                <i class="fa-solid fa-hard-drive text-blue-500"></i>
+                <span data-i18n="storage_status_title">Status Penyimpanan Harddisk</span>
+              </h3>
+              <span id="storage-warning-badge" class="hidden bg-red-500/15 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse flex items-center space-x-1">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span data-i18n="storage_full_warn">Penyimpanan Hampir Penuh!</span>
+              </span>
+            </div>
+            
+            <!-- Progress Bar of storage -->
+            <div class="space-y-1.5">
+              <div class="flex justify-between text-xs text-slate-400">
+                <span id="storage-used-text">Memuat status penyimpanan...</span>
+              </div>
+              <div class="w-full bg-slate-950 rounded-full h-3 border border-slate-800 overflow-hidden p-0.5">
+                <div id="storage-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Manual Record Form Panel (Hidden by default) -->
+          <div id="manual-record-form-panel" class="hidden bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg space-y-3 max-w-lg">
+            <h3 class="font-bold text-sm text-slate-200" data-i18n="manual_recorder">Mulai Perekaman Manual</h3>
+            <form onsubmit="handleStartManualRecordFromPage(event)" class="flex flex-wrap items-end gap-3">
+              <div class="flex-1 min-w-[150px]">
+                <label class="block text-[10px] text-slate-400 uppercase font-semibold mb-1">Pilih Kamera</label>
+                <select id="rec-page-cam-select" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                  <!-- Loaded dynamically -->
+                </select>
+              </div>
+              <div class="w-24">
+                <label class="block text-[10px] text-slate-400 uppercase font-semibold mb-1">Durasi (Detik)</label>
+                <input type="number" id="rec-page-duration" value="120" min="10" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono">
+              </div>
+              <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition border-0 cursor-pointer">
+                Mulai
+              </button>
+            </form>
+          </div>
+
+          <!-- Active Recordings List Panel -->
+          <div id="active-recordings-panel" class="hidden bg-slate-900 border border-red-500/30 p-4 rounded-xl space-y-2.5 border-l-4 border-l-red-500 shadow-lg">
+            <h4 class="text-xs font-bold text-red-500 uppercase tracking-wider flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+              <span>Perekaman Aktif Sekarang</span>
+            </h4>
+            <div id="active-recordings-list" class="divide-y divide-slate-800/60 max-h-48 overflow-y-auto pr-1"></div>
+          </div>
+
+          <!-- Records Table -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs md:text-sm text-slate-300 border-collapse">
+                <thead class="bg-slate-950 text-slate-400 text-[10px] md:text-xs uppercase font-semibold border-b border-slate-800">
+                  <tr>
+                    <th class="p-3 md:p-4" data-i18n="camera_name">Nama Kamera</th>
+                    <th class="p-3 md:p-4" data-i18n="rec_start">Waktu Mulai</th>
+                    <th class="p-3 md:p-4 hidden sm:table-cell" data-i18n="rec_end">Waktu Selesai</th>
+                    <th class="p-3 md:p-4" data-i18n="rec_duration">Durasi</th>
+                    <th class="p-3 md:p-4 hidden sm:table-cell" data-i18n="rec_size">Ukuran (MB)</th>
+                    <th class="p-3 md:p-4 text-center" data-i18n="status">Status</th>
+                    <th class="p-3 md:p-4 text-right" data-i18n="action">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="records-table-body" class="divide-y divide-slate-800/60"></tbody>
+              </table>
+            </div>
+            <div id="records-empty" class="hidden p-8 text-center text-slate-500 text-xs md:text-sm" data-i18n="records_empty">Tidak ada file rekaman ditemukan.</div>
+          </div>
+        </section>
+
+        <!-- ================= VIEW: CAMERAS MANAGEMENT ================= -->
+        <section id="view-cameras" class="view-section admin-only hidden space-y-6">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+            <div>
+              <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="cameras_title">Manajemen Kamera</h2>
+              <p class="text-slate-400 text-xs md:text-sm" data-i18n="cameras_sub_admin">Tambahkan, ubah, atau hapus konfigurasi kamera CCTV dalam sistem.</p>
+            </div>
+            <button onclick="openCameraFormModal()" class="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition shadow-md self-start sm:self-auto cursor-pointer border-0">
+              <i class="fa-solid fa-plus"></i>
+              <span data-i18n="add_camera">Tambah Kamera</span>
+            </button>
+          </div>
+
+          <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs md:text-sm text-slate-300 border-collapse">
+                <thead class="bg-slate-950 text-slate-400 text-[10px] md:text-xs uppercase font-semibold border-b border-slate-800">
+                  <tr>
+                    <th class="p-3 md:p-4" data-i18n="camera_name">Nama Kamera</th>
+                    <th class="p-3 md:p-4" data-i18n="location">Lokasi</th>
+                    <th class="p-3 md:p-4 hidden sm:table-cell" data-i18n="stream_type">Tipe Stream</th>
+                    <th class="p-3 md:p-4 hidden md:table-cell" data-i18n="channel">Chan</th>
+                    <th class="p-3 md:p-4" data-i18n="visibility">Visibilitas</th>
+                    <th class="p-3 md:p-4 text-center" data-i18n="active">Aktif</th>
+                    <th class="p-3 md:p-4 hidden lg:table-cell" data-i18n="records">Schedules</th>
+                    <th class="p-3 md:p-4 text-right" data-i18n="action">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="cameras-table-body" class="divide-y divide-slate-800/60"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VIEW: USERS MANAGEMENT ================= -->
+        <section id="view-users" class="view-section admin-only hidden space-y-6">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+            <div>
+              <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="users_title">Manajemen Pengguna</h2>
+              <p class="text-slate-400 text-xs md:text-sm" data-i18n="users_sub">Kelola akun administrator dan publik untuk mengontrol akses CCTV.</p>
+            </div>
+            <button onclick="openUserFormModal()" class="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition shadow-md self-start sm:self-auto cursor-pointer border-0">
+              <i class="fa-solid fa-user-plus"></i>
+              <span data-i18n="add_user">Tambah User</span>
+            </button>
+          </div>
+
+          <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg max-w-4xl">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs md:text-sm text-slate-300 border-collapse">
+                <thead class="bg-slate-950 text-slate-400 text-[10px] md:text-xs uppercase font-semibold border-b border-slate-800">
+                  <tr>
+                    <th class="p-3 md:p-4" data-i18n="username">Username</th>
+                    <th class="p-3 md:p-4" data-i18n="role">Role / Peran</th>
+                    <th class="p-3 md:p-4 hidden sm:table-cell" data-i18n="created_at">Dibuat Pada</th>
+                    <th class="p-3 md:p-4 text-right" data-i18n="action">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-body" class="divide-y divide-slate-800/60"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VIEW: SETTINGS ================= -->
+        <section id="view-settings" class="view-section hidden space-y-6 max-w-4xl">
+          <div>
+            <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="settings_title">Pengaturan Sistem</h2>
+            <p class="text-slate-400 text-xs md:text-sm" data-i18n="settings_sub">Kustomisasi metadata aplikasi dan ganti kata sandi login Anda.</p>
+          </div>
+
+          <div id="settings-app-panel" class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 space-y-4 shadow-lg admin-only hidden">
+            <h3 class="text-base md:text-lg font-bold border-b border-slate-800 pb-2 text-blue-400" data-i18n="app_settings">Pengaturan Tampilan Aplikasi</h3>
+            <form id="settings-app-form" onsubmit="handleSaveAppSettings(event)" class="space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="setting_name">Nama Aplikasi</label>
+                  <input type="text" id="setting-app-name" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                  <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="setting_sub">Subtitle Aplikasi</label>
+                  <input type="text" id="setting-app-sub" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="setting_running">Teks Berjalan Utama</label>
+                <textarea id="setting-running-text" required rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+              </div>
+              <div>
+                <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="setting_footer">Kaki Halaman (Footer)</label>
+                <input type="text" id="setting-site-footer" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition cursor-pointer border-0" data-i18n="save">Simpan Perubahan</button>
+            </form>
+          </div>
+
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 space-y-4 shadow-lg">
+            <h3 class="text-base md:text-lg font-bold border-b border-slate-800 pb-2 text-blue-400" data-i18n="change_password">Ganti Kata Sandi</h3>
+            <form id="settings-pwd-form" onsubmit="handleChangePassword(event)" class="space-y-4 max-w-md">
+              <div>
+                <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_old">Kata Sandi Lama</label>
+                <input type="password" id="pwd-old" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_new">Kata Sandi Baru</label>
+                <input type="password" id="pwd-new" required minlength="4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_new_confirm">Konfirmasi Kata Sandi Baru</label>
+                <input type="password" id="pwd-new-confirm" required minlength="4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition cursor-pointer border-0" data-i18n="save">Simpan Password</button>
+            </form>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- App Global Sticky Footer -->
+      <footer class="bg-slate-900 border-t border-slate-800 py-3 px-6 text-center text-[10px] md:text-xs text-slate-500 flex-shrink-0 flex items-center justify-between">
+        <span id="app-footer-text">Web-CCTV HG680P</span>
+        <span class="font-mono">v2.7 (Responsive Mobile)</span>
+      </footer>
+    </main>
+  </div>
+
+  <!-- ================= LOGIN FULLPAGE COVER ================= -->
+  <div id="login-container" class="fixed inset-0 bg-slate-950 flex items-center justify-center p-4 z-[999] overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 p-6 md:p-8 rounded-2xl w-full max-w-md shadow-2xl flex flex-col space-y-6 relative my-auto">
+      <!-- Quick Language Switcher on Login Page -->
+      <div class="absolute right-6 top-6 flex items-center space-x-1 bg-slate-950 p-1 rounded-md text-[10px] border border-slate-800">
+        <button id="login-lang-id-btn" class="px-2 py-0.5 rounded transition font-medium text-blue-400 bg-slate-800" onclick="setLanguage('id')">ID</button>
+        <button id="login-lang-en-btn" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200" onclick="setLanguage('en')">EN</button>
+      </div>
+
+      <div class="flex flex-col items-center text-center space-y-2">
+        <div class="bg-blue-600 text-white p-3.5 md:p-4 rounded-2xl shadow-lg shadow-blue-500/20 mb-1">
+          <i class="fa-solid fa-video text-2xl md:text-3xl"></i>
+        </div>
+        <h1 class="text-xl md:text-2xl font-bold tracking-tight text-white">
+          <span id="login-app-name">Web-CCTV</span>
+        </h1>
+        <p id="login-sub-text" class="text-xs md:text-sm text-slate-400" data-i18n="login_desc">Masukkan kredensial Anda untuk mengakses streaming CCTV.</p>
+      </div>
+
+      <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
+        <div>
+          <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1.5" data-i18n="username">Nama Pengguna</label>
+          <div class="relative">
+            <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+            <input type="text" id="login-username" required class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="admin / publik">
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between items-center mb-1.5">
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase" data-i18n="password">Kata Sandi</label>
+          </div>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+            <input type="password" id="login-password" required class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="••••••••">
+          </div>
+        </div>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-xs md:text-sm font-semibold transition shadow-lg shadow-blue-600/10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900" data-i18n="login">
+          Masuk
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: CCTV LIVE STREAM PLAYER ================= -->
+  <div id="modal-player" class="fixed inset-0 bg-slate-950/95 hidden items-center justify-center p-2 md:p-4 z-[200]">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col overflow-hidden max-h-[95vh] my-auto">
+      <div class="p-3 md:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-3 overflow-hidden">
+          <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping flex-shrink-0"></span>
+          <div class="overflow-hidden">
+            <h3 id="player-title" class="font-bold text-sm md:text-base leading-tight truncate">Camera Stream</h3>
+            <p id="player-subtitle" class="text-[10px] md:text-xs text-slate-400 truncate">Loading...</p>
+          </div>
+        </div>
+        <button onclick="closePlayerModal()" class="text-slate-400 hover:text-white hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center transition flex-shrink-0 bg-transparent border-0 cursor-pointer">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 overflow-y-auto max-h-[calc(95vh-60px)]">
+        <div class="lg:col-span-2 bg-black flex items-center justify-center aspect-video relative">
+          <video id="cctv-video" class="w-full h-full object-contain hidden" playsinline muted autoplay></video>
+          <iframe id="cctv-iframe" class="w-full h-full object-contain hidden" frameborder="0" allowfullscreen></iframe>
+          
+          <div id="player-splash" class="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-center p-4 space-y-3">
+            <div id="player-splash-icon" class="text-blue-500 text-2xl md:text-3xl animate-spin">
+              <i class="fa-solid fa-spinner"></i>
+            </div>
+            <p id="player-splash-msg" class="text-xs md:text-sm text-slate-300" data-i18n="loading_stream">Memulai streaming, silakan tunggu...</p>
+          </div>
+        </div>
+
+        <div class="p-3 md:p-4 bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col space-y-3">
+          <div class="space-y-2 text-[11px] md:text-xs bg-slate-950 p-3 rounded-lg border border-slate-800">
+            <h4 class="font-semibold text-slate-400 uppercase tracking-wider" data-i18n="stream_stats">Status Aliran Data</h4>
+            <div class="flex justify-between">
+              <span class="text-slate-400" data-i18n="status">Status</span>
+              <span id="player-status-badge" class="font-semibold text-slate-400">Offline</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-400" data-i18n="latency">Metode</span>
+              <span id="player-method-val" class="font-semibold text-slate-300">--</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-400" data-i18n="uptime">Uptime Stream</span>
+              <span id="player-uptime-val" class="font-semibold text-slate-300">--</span>
+            </div>
+            <div id="player-retry-row" class="flex justify-between hidden">
+              <span class="text-amber-500" data-i18n="reconnection">Percobaan Reconnect</span>
+              <span id="player-retry-val" class="font-semibold text-amber-500">--</span>
+            </div>
+          </div>
+
+          <div id="player-rec-panel" class="admin-only hidden bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2.5">
+            <div class="flex items-center space-x-2 text-slate-400">
+              <i class="fa-solid fa-record-vinyl text-red-500 text-xs"></i>
+              <span class="text-[10px] md:text-xs font-semibold uppercase tracking-wider" data-i18n="manual_recorder">Perekam Manual</span>
+            </div>
+            
+            <div id="rec-not-active" class="space-y-2">
+              <div class="flex items-center space-x-2">
+                <input type="number" id="rec-duration-sec" value="120" min="10" max="1800" class="w-20 bg-slate-900 border border-slate-850 rounded px-2 py-1 text-xs text-white focus:outline-none font-mono">
+                <span class="text-[11px] text-slate-400" data-i18n="seconds">detik</span>
+              </div>
+              <button onclick="handleStartRecordingInPlayer()" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-1.5 rounded text-xs transition flex items-center justify-center space-x-1 border-0 cursor-pointer">
+                <i class="fa-solid fa-circle"></i>
+                <span data-i18n="start_record">Mulai Rekam</span>
+              </button>
+            </div>
+            
+            <div id="rec-active" class="hidden space-y-2">
+              <div class="text-[11px] text-slate-400 flex items-center justify-between">
+                <span class="flex items-center space-x-1 text-red-500"><span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span><span data-i18n="recording">Merekam...</span></span>
+                <span id="rec-active-timer" class="font-mono">--:--</span>
+              </div>
+              <button onclick="handleStopRecordingInPlayer()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-1.5 rounded text-xs transition flex items-center justify-center space-x-1 border border-slate-705">
+                <i class="fa-solid fa-square"></i>
+                <span data-i18n="stop_record">Hentikan Rekam</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Stream controls (Admin Only) -->
+          <div id="player-admin-stream-ctrl" class="admin-only hidden space-y-2">
+            <button onclick="handleForceStopStream()" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-xs font-semibold transition flex items-center justify-center space-x-1 border-0">
+              <i class="fa-solid fa-stop text-[10px]"></i>
+              <span data-i18n="stop_ffmpeg_stream">Matikan FFmpeg Stream</span>
+            </button>
+            <button onclick="toggleFfLog()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 rounded text-xs font-semibold transition flex items-center justify-center space-x-1 border border-slate-700 cursor-pointer">
+              <i class="fa-solid fa-file-invoice text-[10px]"></i>
+              <span id="ff-log-btn-text" data-i18n="show_ffmpeg_log">Lihat Log FFmpeg</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- FFmpeg Log Drawer -->
+      <div id="player-log-drawer" class="hidden flex-1 border-t border-slate-800 bg-slate-950 p-4 font-mono text-[10px] md:text-xs text-slate-400 overflow-y-auto max-h-[200px] select-text">
+        <h4 class="font-semibold text-slate-200 mb-2 border-b border-slate-800 pb-1" data-i18n="ffmpeg_log_tail">Buntut Log Transcoder FFmpeg</h4>
+        <pre id="player-log-content" class="whitespace-pre-wrap leading-relaxed">No logs available</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: RECORD PLAYBACK ================= -->
+  <div id="modal-playback" class="fixed inset-0 bg-slate-950/95 hidden items-center justify-center p-2 md:p-4 z-[210]">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col overflow-hidden my-auto animate-fade-in">
+      <div class="p-3 md:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2 overflow-hidden">
+          <i class="fa-solid fa-play text-blue-500 flex-shrink-0"></i>
+          <div class="overflow-hidden">
+            <h3 id="playback-title" class="font-bold text-sm md:text-base leading-tight truncate">Playback Video</h3>
+            <p id="playback-subtitle" class="text-[10px] md:text-xs text-slate-400 truncate">Loading...</p>
+          </div>
+        </div>
+        <button onclick="closePlaybackModal()" class="text-slate-400 hover:text-white hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center transition flex-shrink-0 bg-transparent border-0 cursor-pointer">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="bg-black aspect-video flex items-center justify-center relative">
+        <video id="playback-video" class="w-full h-full object-contain" controls playsinline></video>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: CAMERA FORM (ADD/EDIT) ================= -->
+  <div id="modal-camera-form" class="fixed inset-0 bg-slate-950/80 hidden items-center justify-center p-2 md:p-4 z-[150]">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+      <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <h3 id="camera-form-title" class="font-bold text-sm md:text-base text-white">Tambah Kamera</h3>
+        <button onclick="closeCameraFormModal()" class="text-slate-400 hover:text-white hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center transition flex-shrink-0 bg-transparent border-0 cursor-pointer">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form onsubmit="handleSaveCamera(event)" class="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 text-slate-300 text-xs md:text-sm">
+        <input type="hidden" id="cam-id">
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="camera_name_req">Nama Kamera *</label>
+            <input type="text" id="cam-name" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="location">Lokasi</label>
+            <input type="text" id="cam-location" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="stream_url_req">RTSP URL / .m3u8 Stream *</label>
+          <input type="text" id="cam-rtsp" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-[10px] md:text-xs" placeholder="rtsp://... atau http://...m3u8">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="stream_type">Tipe Stream / DVR</label>
+            <select id="cam-type" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="ipcam">IP Camera (RTSP)</option>
+              <option value="nvr">NVR (RTSP)</option>
+              <option value="dvr">DVR (RTSP)</option>
+              <option value="hls">HLS / HTTP Live (.m3u8)</option>
+              <option value="youtube">YouTube Live Link</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="channel">Channel</label>
+            <input type="number" id="cam-channel" value="1" min="1" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="youtube_embed">YouTube Video ID</label>
+            <input type="text" id="cam-yt" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Contoh: dQw4w9WgXcQ">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-800/80 pt-4">
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="latitude">Latitude (Peta)</label>
+            <input type="number" id="cam-lat" step="any" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="longitude">Longitude (Peta)</label>
+            <input type="number" id="cam-lng" step="any" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+        </div>
+
+        <div class="border-t border-slate-800/80 pt-4 space-y-3">
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" id="cam-rec-enabled" class="rounded bg-slate-950 border-slate-800 text-blue-600 focus:ring-blue-500">
+            <span class="text-[11px] md:text-xs font-semibold text-slate-300" data-i18n="record_enabled">Aktifkan Perekaman Otomatis Terjadwal</span>
+          </label>
+          
+          <div id="cam-rec-settings-div" class="grid grid-cols-1 sm:grid-cols-2 gap-4 hidden bg-slate-950/50 p-3 rounded-lg border border-slate-800/80">
+            <div>
+              <label class="block text-[9px] md:text-[10px] font-semibold text-slate-400 uppercase mb-1">Mode & Waktu Rekam</label>
+              <select id="cam-rec-schedule-preset" class="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500" onchange="handleRecSchedulePresetChange(this.value)">
+                <option value="24h">Perekaman 24 Jam (Terus-menerus)</option>
+                <option value="*/1">Setiap 1 Menit (Tes)</option>
+                <option value="*/5">Setiap 5 Menit</option>
+                <option value="*/15">Setiap 15 Menit</option>
+                <option value="*/30">Setiap 30 Menit</option>
+                <option value="0">Setiap 1 Jam</option>
+                <option value="custom">Kustom Cron Mini (Lanjut)</option>
+              </select>
+              
+              <input type="hidden" id="cam-rec-schedule" value="24h">
+              
+              <div id="custom-cron-div" class="hidden mt-2 animate-fade-in">
+                <input type="text" id="cam-rec-schedule-custom-val" value="0 * * * *" class="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none font-mono" placeholder="Contoh: 0 0 * * *">
+                <span class="text-[8px] text-slate-500 block mt-1">Format cron mini: menit jam</span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[9px] md:text-[10px] font-semibold text-slate-400 uppercase mb-1" data-i18n="record_duration">Durasi Per File (Detik)</label>
+              <input type="number" id="cam-rec-duration" value="300" min="10" class="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-800/80 pt-4">
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" id="cam-is-public" checked class="rounded bg-slate-950 border-slate-800 text-blue-600 focus:ring-blue-500">
+            <span class="text-[11px] md:text-xs text-slate-300" data-i18n="is_public">Publik (Dilihat Tanpa Login Admin)</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" id="cam-is-active" checked class="rounded bg-slate-950 border-slate-800 text-blue-600 focus:ring-blue-500">
+            <span class="text-[11px] md:text-xs text-slate-300" data-i18n="is_active">Kamera Aktif / Diaktifkan</span>
+          </label>
+        </div>
+
+        <div class="flex items-center justify-end space-x-3 border-t border-slate-800/80 pt-4 flex-shrink-0">
+          <button type="button" onclick="closeCameraFormModal()" class="px-4 py-2 text-slate-400 hover:text-white transition text-xs md:text-sm font-semibold border-0 bg-transparent cursor-pointer" data-i18n="cancel">Batal</button>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-xs md:text-sm font-semibold transition border-0 cursor-pointer" data-i18n="save">Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: USER FORM ================= -->
+  <div id="modal-user-form" class="fixed inset-0 bg-slate-950/80 hidden items-center justify-center p-2 md:p-4 z-[150]">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col my-auto">
+      <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <h3 id="user-form-title" class="font-bold text-sm md:text-base text-white">Tambah User</h3>
+        <button onclick="closeUserFormModal()" class="text-slate-400 hover:text-white hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center transition flex-shrink-0 bg-transparent border-0 cursor-pointer">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form onsubmit="handleSaveUser(event)" class="p-6 space-y-4 text-slate-300 text-xs md:text-sm">
+        <input type="hidden" id="usr-id">
+        <div>
+          <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="username_req">Username *</label>
+          <input type="text" id="usr-username" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label id="usr-password-label" class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_req">Kata Sandi *</label>
+          <input type="password" id="usr-password" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <span id="usr-pwd-hint" class="text-[9px] text-slate-500 hidden" data-i18n="pwd_hint">Kosongkan jika tidak ingin merubah password.</span>
+        </div>
+        <div>
+          <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="role">Role / Peran</label>
+          <select id="usr-role" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="public" data-i18n="role_public">Publik (Hanya Lihat)</option>
+            <option value="admin" data-i18n="role_admin">Admin (Kontrol Penuh)</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-end space-x-3 border-t border-slate-800/80 pt-4">
+          <button type="button" onclick="closeUserFormModal()" class="px-4 py-2 text-slate-400 hover:text-white transition text-xs md:text-sm font-semibold border-0 bg-transparent cursor-pointer" data-i18n="cancel">Batal</button>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-xs md:text-sm font-semibold transition border-0 cursor-pointer" data-i18n="save">Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="global-loader" class="fixed inset-0 bg-slate-950/80 flex flex-col items-center justify-center z-[9999] transition-opacity duration-300">
+    <div class="flex flex-col items-center space-y-3">
+      <div class="text-blue-500 text-4xl md:text-5xl animate-spin">
+        <i class="fa-solid fa-spinner"></i>
+      </div>
+      <p id="loader-msg" class="text-xs md:text-sm font-medium text-slate-300">Memuat Aplikasi...</p>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-4 right-4 bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 z-[9999] max-w-sm pointer-events-none transform translate-y-20 opacity-0 transition-all duration-300">
+    <div id="toast-icon" class="text-emerald-500">
+      <i class="fa-solid fa-circle-check text-lg"></i>
+    </div>
+    <span id="toast-message" class="text-xs md:text-sm font-semibold text-slate-200">Success message!</span>
+  </div>
+
+  <!-- Script Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
