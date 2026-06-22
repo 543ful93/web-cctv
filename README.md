@@ -111,6 +111,14 @@ sudo journalctl -u webcctv -f
 ```
 Aplikasi Web-CCTV kini dapat diakses secara lokal di: **`http://<IP_STB_ANDA>:3000`**
 
+### 🔑 Kredensial Login Bawaan (Default):
+*   **Akun Administrator (Akses Penuh)**:
+    - **Nama Pengguna**: `admin`
+    - **Kata Sandi**: `admin123`
+*   **Akun Publik (Hanya Lihat)**:
+    - **Nama Pengguna**: `publik`
+    - **Kata Sandi**: `publik123`
+
 ---
 
 ## 💾 3. Kustomisasi Penyimpanan & Proteksi Hardisk 500GB
