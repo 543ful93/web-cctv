@@ -113,7 +113,7 @@
           <i class="fa-solid fa-map-location-dot w-5 text-center"></i>
           <span data-i18n="menu_map">Peta Lokasi</span>
         </button>
-        <button data-view="records" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
+        <button data-view="records" class="nav-item admin-only hidden flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
           <i class="fa-solid fa-compact-disc w-5 text-center"></i>
           <span data-i18n="menu_records">Rekaman</span>
         </button>
@@ -257,6 +257,18 @@
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 flex flex-col space-y-4 text-xs md:text-sm text-slate-300">
               <h3 class="font-bold text-base md:text-lg text-white border-b border-slate-800 pb-2" data-i18n="dash_sys_info">Spesifikasi & Informasi</h3>
               <ul class="space-y-3">
+                <li class="flex justify-between border-b border-slate-800 pb-1.5">
+                  <span class="text-slate-400">Beban CPU STB</span>
+                  <span id="sys-cpu" class="font-mono font-bold text-slate-200">--%</span>
+                </li>
+                <li class="flex justify-between border-b border-slate-800 pb-1.5">
+                  <span class="text-slate-400">Suhu CPU STB</span>
+                  <span id="sys-temp" class="font-mono font-bold text-amber-500">-- °C</span>
+                </li>
+                <li class="flex justify-between border-b border-slate-800 pb-1.5">
+                  <span class="text-slate-400">Memori RAM</span>
+                  <span id="sys-ram" class="font-mono font-semibold text-slate-200">-- / -- GB</span>
+                </li>
                 <li class="flex justify-between border-b border-slate-800 pb-1.5">
                   <span class="text-slate-400">NodeJS</span>
                   <span class="font-mono">v18 / v20</span>
@@ -574,21 +586,28 @@
           </div>
 
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 space-y-4 shadow-lg">
-            <h3 class="text-base md:text-lg font-bold border-b border-slate-800 pb-2 text-blue-400" data-i18n="change_password">Ganti Kata Sandi</h3>
+            <h3 class="font-bold text-sm md:text-base border-b border-slate-800 pb-2 text-blue-400" data-i18n="account_settings">Pengaturan Akun (Ubah Username & Password)</h3>
             <form id="settings-pwd-form" onsubmit="handleChangePassword(event)" class="space-y-4 max-w-md">
               <div>
+                <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="username">Nama Pengguna (Username)</label>
+                <input type="text" id="pwd-username" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div class="border-t border-slate-800/60 pt-2">
+                <p class="text-[10px] text-slate-500 mb-2">Isi kolom di bawah ini HANYA jika Anda ingin merubah Kata Sandi:</p>
+              </div>
+              <div>
                 <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_old">Kata Sandi Lama</label>
-                <input type="password" id="pwd-old" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="pwd-old" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Masukkan sandi lama jika ingin ganti sandi">
               </div>
               <div>
                 <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_new">Kata Sandi Baru</label>
-                <input type="password" id="pwd-new" required minlength="4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="pwd-new" minlength="4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Sandi baru (min 4 karakter)">
               </div>
               <div>
                 <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1" data-i18n="pwd_new_confirm">Konfirmasi Kata Sandi Baru</label>
-                <input type="password" id="pwd-new-confirm" required minlength="4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="pwd-new-confirm" minlength="4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ulangi sandi baru">
               </div>
-              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition cursor-pointer border-0" data-i18n="save">Simpan Password</button>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition cursor-pointer border-0" data-i18n="save">Simpan Perubahan</button>
             </form>
           </div>
         </section>
@@ -613,8 +632,26 @@
       </div>
 
       <div class="flex flex-col items-center text-center space-y-2">
-        <div class="bg-blue-600 text-white p-3.5 md:p-4 rounded-2xl shadow-lg shadow-blue-500/20 mb-1">
-          <i class="fa-solid fa-video text-2xl md:text-3xl"></i>
+        <div class="mb-1 flex items-center justify-center">
+          <div class="relative flex items-center justify-center">
+            <!-- Pulsing outer ring -->
+            <span class="animate-ping absolute inline-flex h-12 w-12 rounded-full bg-blue-500/20 opacity-75"></span>
+            <div class="bg-gradient-to-tr from-blue-700 to-blue-500 text-white w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl border border-blue-400/30 relative z-10 overflow-hidden">
+              <!-- Custom PNG Logo (Can be replaced simply by uploading logo-login.png to public/ folder) -->
+              <img id="login-logo-img" src="/logo-login.png" class="w-full h-full object-cover hidden" onload="this.classList.remove('hidden'); document.getElementById('login-logo-svg').classList.add('hidden');" onerror="this.classList.add('hidden'); document.getElementById('login-logo-svg').classList.remove('hidden');">
+              
+              <!-- Fallback SVG CCTV Camera with security shield -->
+              <svg id="login-logo-svg" xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 111.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                <circle cx="12" cy="11" r="2" fill="white" stroke-width="0"></circle>
+              </svg>
+            </div>
+            <!-- Blinking Red LED Status Indicator -->
+            <span class="absolute top-0 right-0 flex h-3 w-3 z-20">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+            </span>
+          </div>
         </div>
         <h1 class="text-xl md:text-2xl font-bold tracking-tight text-white">
           <span id="login-app-name">Web-CCTV</span>
@@ -627,7 +664,7 @@
           <label class="block text-[10px] md:text-xs font-semibold text-slate-400 uppercase mb-1.5" data-i18n="username">Nama Pengguna</label>
           <div class="relative">
             <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
-            <input type="text" id="login-username" required class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="admin / publik">
+            <input type="text" id="login-username" required class="w-full bg-transparent border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="username">
           </div>
         </div>
         <div>
@@ -636,7 +673,11 @@
           </div>
           <div class="relative">
             <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
-            <input type="password" id="login-password" required class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="••••••••">
+            <input type="password" id="login-password" required class="w-full bg-transparent border border-slate-800 rounded-xl pl-10 pr-12 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="••••••••">
+            <!-- Toggle password visibility button -->
+            <button type="button" onclick="toggleLoginPasswordVisibility()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition focus:outline-none p-1 border-0 bg-transparent cursor-pointer" title="Lihat/Sembunyikan Kata Sandi">
+              <i id="password-toggle-icon" class="fa-solid fa-eye-slash text-sm"></i>
+            </button>
           </div>
         </div>
         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-xs md:text-sm font-semibold transition shadow-lg shadow-blue-600/10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900" data-i18n="login">
@@ -934,6 +975,24 @@
   <!-- Script Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Toggle Password Visibility on Login Screen
+    function toggleLoginPasswordVisibility() {
+      const pwdInput = document.getElementById("login-password");
+      const toggleIcon = document.getElementById("password-toggle-icon");
+      if (pwdInput && toggleIcon) {
+        if (pwdInput.type === "password") {
+          pwdInput.type = "text";
+          toggleIcon.classList.remove("fa-eye-slash");
+          toggleIcon.classList.add("fa-eye");
+        } else {
+          pwdInput.type = "password";
+          toggleIcon.classList.remove("fa-eye");
+          toggleIcon.classList.add("fa-eye-slash");
+        }
+      }
+    }
+  </script>
   <script src="/app.js"></script>
 </body>
 </html>

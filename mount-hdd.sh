@@ -141,6 +141,10 @@ chmod -R 777 "$MOUNT_DIR"
 # Ensure Web-CCTV folder exists
 mkdir -p "$MOUNT_DIR"
 
+# Membuat berkas pengaman detektor status mount (Mata-Mata Hardisk untuk server)
+touch "$MOUNT_DIR/.cctv_hdd_active"
+chmod 777 "$MOUNT_DIR/.cctv_hdd_active"
+
 # Update/Verify symlink inside Web-CCTV folder
 # If Web-CCTV is installed at /opt/webcctv or /root/web-cctv, update the symlink public/records
 PROJECT_DIR="/opt/webcctv"

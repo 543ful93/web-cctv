@@ -38,6 +38,7 @@ const i18n = {
     menu_cameras: "Kelola Kamera",
     menu_users: "Kelola User",
     menu_settings: "Pengaturan",
+    menu_monitor: "Monitor Publik (Terpisah)",
     logout: "Keluar",
     login: "Masuk",
     username: "Nama Pengguna",
@@ -177,6 +178,7 @@ const i18n = {
     menu_cameras: "Manage Cameras",
     menu_users: "Manage Users",
     menu_settings: "Settings",
+    menu_monitor: "Public Monitor (Separate)",
     logout: "Logout",
     login: "Login",
     username: "Username",
@@ -377,7 +379,9 @@ function checkAuthSession() {
     // Set User Profile UI info
     const userNameEl = document.getElementById("user-display-name");
     const userRoleEl = document.getElementById("user-display-role");
+    const pwdUsernameEl = document.getElementById("pwd-username");
     if (userNameEl) userNameEl.innerText = currentUser.username;
+    if (pwdUsernameEl) pwdUsernameEl.value = currentUser.username;
     if (userRoleEl) {
       userRoleEl.innerText = currentUser.role === 'admin' ? 
         (currentLanguage === 'id' ? "Administrator" : "Administrator") : 
@@ -670,6 +674,39 @@ async function loadDashboardStats() {
     setInner("stat-streaming-now", stats.streamingNow);
     setInner("stat-recording-now", stats.recordingNow);
     setInner("stat-records-size", stats.recordsSizeMb + " MB");
+
+    // Load CPU, RAM, and Temperature dynamically!
+    try {
+      const resSpecs = await fetch("/api/system/specs", { headers });
+      const specs = await resSpecs.json();
+      
+      const cpuEl = document.getElementById("sys-cpu");
+      const tempEl = document.getElementById("sys-temp");
+      const ramEl = document.getElementById("sys-ram");
+
+      if (cpuEl) cpuEl.innerText = `${specs.cpu}%`;
+      if (tempEl) {
+        if (specs.temp) {
+          tempEl.innerText = `${specs.temp} °C`;
+          const t = parseFloat(specs.temp);
+          if (t >= 75) {
+            tempEl.className = "font-mono font-bold text-red-500 animate-pulse";
+          } else if (t >= 60) {
+            tempEl.className = "font-mono font-bold text-amber-500";
+          } else {
+            tempEl.className = "font-mono font-bold text-emerald-500";
+          }
+        } else {
+          tempEl.innerText = "N/A";
+          tempEl.className = "font-mono font-semibold text-slate-500";
+        }
+      }
+      if (ramEl) {
+        ramEl.innerText = `${specs.ram_used} / ${specs.ram_total} GB (${specs.ram_percent}%)`;
+      }
+    } catch (e) {
+      console.error("Gagal memuat system specs:", e.message);
+    }
 
     // Load Camera Connection Status list
     const resCams = await fetch("/api/cameras/status", { headers });
@@ -2500,11 +2537,12 @@ async function handleSaveAppSettings(e) {
 async function handleChangePassword(e) {
   e.preventDefault();
   
+  const updatedUsername = document.getElementById("pwd-username").value.trim();
   const oldPw = document.getElementById("pwd-old").value;
   const newPw = document.getElementById("pwd-new").value;
   const confirmPw = document.getElementById("pwd-new-confirm").value;
 
-  if (newPw !== confirmPw) {
+  if (newPw && newPw !== confirmPw) {
     showToast(currentLanguage === 'id' ? "Konfirmasi sandi baru tidak cocok!" : "New password confirmations do not match!", "error");
     return;
   }
@@ -2516,17 +2554,33 @@ async function handleChangePassword(e) {
   };
 
   try {
-    const res = await fetch("/api/profile/password", {
+    const res = await fetch("/api/profile/update", {
       method: "POST",
       headers,
-      body: JSON.stringify({ old_password: oldPw, new_password: newPw })
+      body: JSON.stringify({ 
+        username: updatedUsername, 
+        old_password: oldPw, 
+        new_password: newPw 
+      })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Gagal mengubah kata sandi");
+    if (!res.ok) throw new Error(data.error || "Gagal memperbarui profil");
 
-    showToast(currentLanguage === 'id' ? "Kata sandi berhasil diubah!" : "Password successfully changed!", "success");
-    const form = document.getElementById("settings-pwd-form");
-    if (form) form.reset();
+    // Simpan token & user baru jika berhasil mengubah username
+    safeStorage.setItem("token", data.token);
+    safeStorage.setItem("user", JSON.stringify({ username: data.username, role: currentUser.role }));
+    currentUser.username = data.username;
+
+    // Perbarui nama di sidebar & header
+    const userNameEl = document.getElementById("user-display-name");
+    if (userNameEl) userNameEl.innerText = data.username;
+
+    showToast(currentLanguage === 'id' ? "Profil berhasil diperbarui!" : "Profile successfully updated!", "success");
+    
+    // Kosongkan kolom password setelah berhasil
+    document.getElementById("pwd-old").value = "";
+    document.getElementById("pwd-new").value = "";
+    document.getElementById("pwd-new-confirm").value = "";
   } catch (err) {
     showToast(err.message, "error");
   }

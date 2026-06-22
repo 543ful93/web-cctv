@@ -1,65 +1,101 @@
-# Web-CCTV HG680P v2.7 (Release Produksi Stabil & Hemat Daya)
+# Web-CCTV HG680P v2.7 (Release Produksi Stabil, Aman & Hemat Daya)
 
-Web-CCTV modern, ultra-ringan, hemat CPU, dan responsif mobile – dirancang khusus untuk perangkat **STB Armbian HG680P / B860H (Amlogic S905X)** dengan performa maksimal 24 jam non-stop.
+Sistem Web-CCTV modern, ultra-ringan, hemat CPU, dan responsif mobile – dirancang khusus untuk berjalan secara optimal 24 jam non-stop pada perangkat **STB Armbian HG680P / B860H (Amlogic S905X)** dengan memori terbatas (1GB - 2GB RAM).
 
-Sistem Web-CCTV v2.7 ini menyajikan pemantauan langsung HLS & YouTube, perekaman terjadwal/manual, sinkronisasi hardisk, status penyimpanan riil, pembersihan otomatis (auto-cleanup), dan dukungan multi-bahasa (ID/EN) yang ramah pengguna.
+Rilis **v2.7** menyajikan arsitektur satu dashboard dinamis (`index.html`) yang tangguh, sistem keamanan berbasis peran (RBAC) yang ketat, pencegah kerusakan SD Card terintegrasi, serta tampilan login premium yang elegan dan fleksibel.
 
 ---
 
-## 🛠️ Kebutuhan Sistem & Spesifikasi STB
-* **Sistem Operasi**: Armbian (Debian/Ubuntu) berbasis kernel Linux stable.
-* **Arsitektur CPU**: ARMv8 Cortex-A53 (Amlogic S905X, S905W, atau sejenisnya).
-* **Alokasi RAM**: Minimal 1 GB (sangat bersahabat dengan RAM STB yang terbatas).
-* **Perangkat Lunak**: 
-  - Node.js (v16 atau v18+)
-  - FFmpeg (dengan decoder/encoder H.264 & AAC)
-  - SQLite3 (database lokal yang super cepat & bebas overhead)
-* **Penyimpanan**: USB Harddisk Eksternal 500GB (sangat disarankan untuk mengamankan SD Card dari kerusakan penulisan terus-menerus).
+## 📊 Galeri Antarmuka Web-CCTV (Screenshots)
+
+Berikut adalah dokumentasi tampilan antarmuka dari sistem **Web-CCTV HG680P v2.7** baik pada perangkat Desktop maupun Ponsel:
+
+### 1. Tampilan Grid Live CCTV (Desktop Admin)
+*Tampilan pemantauan terpusat dengan multi-snapshot grid berkendala CPU sangat rendah.*
+![Live CCTV Grid Desktop](uploads/Live%20cctv.PNG)
+
+### 2. Tampilan Peta Interaktif & Live Popup Player
+*Integrasi peta Leaflet + OpenStreetMap. Klik pada pin kamera hijau untuk memutar video live langsung di atas balon peta secara asinkron.*
+![Interactive Location Map](uploads/Map.PNG)
+
+### 3. Tampilan Dasbor Akun Publik (Terbatas & Aman)
+*Login khusus peran Publik (username: `publik`) hanya diizinkan melihat kamera yang dicentang aktif oleh Administrator. Menu sensitif otomatis disembunyikan.*
+![Public User Dashboard View](uploads/Publik.PNG)
+
+### 4. Tampilan Responsif Mobile (Ponsel Portrait)
+*Antarmuka ultra-responsif yang menyesuaikan ukuran layar ponsel secara instan, sangat pas diakses dari HP atau APK Android Hybrid.*
+<img src="uploads/Mobile.jpg" width="320" alt="Responsive Mobile View">
 
 ---
 
 ## 🏗️ Mengapa Sistem v2.7 Sangat Ringan di STB HG680P?
 
-Untuk menjaga CPU STB tetap dingin (**di bawah 30% pemakaian CPU**), sistem v2.7 mengimplementasikan **Formula Emas Transcode Video** yang berjalan di backend `server.js` kita:
+Untuk menjaga CPU STB tetap dingin (**di bawah 30% pemakaian CPU**), sistem v2.7 mengimplementasikan **Formula Emas Transcode Video & Pengolahan Gambar**:
 
-1. **Preset Ultrafast (`-preset ultrafast`)**: Memotong beban encoding CPU hingga lebih dari 75% dibandingkan preset bawaan FFmpeg.
-2. **Optimalisasi Resolusi & Frame Rate (`960x540 @15fps`)**: Menurunkan resolusi ke 540p dan FPS ke 15 (standar CCTV keamanan). Ini memangkas piksel yang harus dihitung sebanyak 4x lipat dibanding Full HD 1080p, sekaligus sangat menghemat ruang penyimpanan.
-3. **Kompatibilitas Mutlak H.264 Baseline**: Banyak kamera IP menggunakan format HEVC (H.265). Karena peramban web (Chrome, Safari, Edge, Firefox) **tidak mendukung H.265 secara native**, rekaman langsung akan menghasilkan **blank hitam** di pemutar web. Sistem v2.7 otomatis men-transcode video ke H.264 Baseline Profile agar **100% kompatibel dan langsung bisa diputar di web/HP Android**.
-4. **Perekaman Tanpa Audio (`-an`)**: IP camera murah umumnya mengirim audio berkode PCM G.711 (PCMA/PCMU). Jika dipaksa disalin ke wadah MP4, FFmpeg akan langsung crash dalam 2 detik. Kami menonaktifkan audio (`-an`) untuk menjamin stabilitas perekaman tanpa crash.
+1. **Preset Ultrafast (`-preset ultrafast`)**: Memotong beban encoding CPU hingga lebih dari 75% dibandingkan preset bawaan FFmpeg standar.
+2. **Resolusi & Frame Rate Optimal (`960x540 @15fps`)**: Menurunkan resolusi ke 540p dan FPS ke 15 (standar CCTV keamanan). Ini memangkas piksel yang harus dihitung sebanyak 4x lipat dibanding 1080p, sekaligus sangat menghemat ruang penyimpanan.
+3. **Kompatibilitas Mutlak H.264 Baseline**: Banyak kamera IP menggunakan format HEVC (H.265). Karena peramban web (Chrome, Safari, Edge, Firefox) **tidak mendukung H.265 secara native**, rekaman mentah akan menghasilkan **blank hitam** di pemutar web. Sistem v2.7 otomatis men-transcode video ke H.264 Baseline Profile agar **100% langsung bisa diputar di web/HP Android**.
+4. **Perekaman Tanpa Audio (`-an`)**: IP camera murah umumnya mengirim audio berkode PCM G.711 (PCMA/PCMU). Jika dipaksa disalin ke wadah MP4, FFmpeg akan langsung crash dalam 2 detik. Мы menonaktifkan audio (`-an`) untuk menjamin stabilitas perekaman tanpa crash.
+5. **Pemuat Snapshot Ringan (Mata Dewa)**: Pada grid live, sistem menggunakan penarikan berkas gambar snapshot JPEG berkala dari `/api/snapshot/:id` (penyegaran otomatis setiap 6 detik) alih-alih memutar banyak aliran video HLS secara bersamaan. Aliran video HLS asli hanya diputar ketika kamera diklik secara terfokus pada jendela modal player, menghemat penggunaan memori hingga 90%!
+6. **Pemantauan Suhu, CPU & RAM STB Real-Time**: Pada panel "Spesifikasi & Informasi" di dashboard, sistem v2.7 secara native memantau persentase pemakaian CPU, alokasi memori RAM terpakai, serta sensor suhu termal (thermal sensor) STB secara langsung dari kernel Linux `/sys/class/thermal`. Hal ini membantu Anda memantau "kesehatan" STB saat bekerja keras!
 
 ---
 
-## 📥 1. Petunjuk Instalasi Lengkap (Mulai Dari Awal)
+## 🎨 Spesifikasi Visual & Kustomisasi Login Premium
 
-### Langkah 1: Persiapan Folder Proyek
-Tempatkan file proyek ini di direktori aktif STB Anda. Folder standar yang direkomendasikan adalah `/root/web-cctv` atau `/opt/webcctv`.
+Halaman masuk (*login page*) pada v2.7 telah didesain ulang menggunakan gaya **Dark Glassmorphism** (transparansi gelap) yang sangat premium dan mendukung penjenamaan (*branding*) mandiri:
+
+### A. Dimensi & Aturan Berkas Logo PNG Kustom
+Sistem mendukung penjenamaan logo kustom Anda secara dinamis. Anda hanya perlu meletakkan file gambar PNG Anda ke dalam folder `public/` dengan spesifikasi berikut:
+
+1. **Logo Halaman Login (`logo-login.png`)**:
+   - **Nama File**: `logo-login.png` (Wajib persis)
+   - **Lokasi Penyimpanan**: `/opt/webcctv/public/logo-login.png`
+   - **Ukuran Rekomendasi**: **256 x 256 piksel** (Akan dirender secara otomatis pada resolusi **56 x 56 piksel** / kelas Tailwind `w-14 h-14` dengan gradasi tameng berdenyut).
+   - **Tipe File**: PNG transparan (.png).
+
+2. **Logo Utama & Sidebar Navigasi (`logo.png`)**:
+   - **Nama File**: `logo.png` (Wajib persis)
+   - **Lokasi Penyimpanan**: `/opt/webcctv/public/logo.png`
+   - **Ukuran Rekomendasi**: **128 x 128 piksel** (Akan dirender otomatis pada ukuran **36 x 36 piksel** / kelas `w-9 h-9` pada sidebar desktop, dan **28 x 28 piksel** / kelas `w-7 h-7` pada header mobile).
+   - **Tipe File**: PNG transparan (.png).
+
+> **💡 Fitur Fail-Safe Fallback**: Jika berkas `logo-login.png` atau `logo.png` tidak ditemukan di folder tersebut, sistem secara cerdas akan menyembunyikan gambar yang rusak dan **mengaktifkan kembali ikon tameng CCTV SVG bawaan yang berdenyut**. Sistem dijamin bebas dari ikon gambar pecah!
+
+### B. Input Transparan & Elemen Interaktif
+- **Username Transparan**: Input nama pengguna kini menggunakan kelas `bg-transparent border-slate-800` dengan petunjuk tulisan (*placeholder*) minimalis bertuliskan **`username`** (menggantikan kata `"admin/publik"` yang kaku). Latar belakang kolom akan menyala biru lembut saat diklik.
+- **Lihat & Sembunyikan Sandi**: Di dalam kolom Kata Sandi, terdapat tombol ikon mata (`fa-eye-slash`) interaktif sekali sentuh yang dapat diklik pengguna untuk merubah jenis kolom input secara instan dari tersembunyi (`••••••••`) menjadi teks biasa, meningkatkan kenyamanan saat login.
+
+---
+
+## 📥 2. Petunjuk Instalasi Lengkap (Mulai Dari Awal)
+
+### Langkah 1: Penempatan Folder Proyek
+Ekstrak atau tempatkan file proyek Web-CCTV v2.7 ini di direktori aktif STB Anda. Folder standar yang direkomendasikan adalah `/root/web-cctv` atau `/opt/webcctv`.
 
 ```bash
-# Masuk ke folder proyek Anda
+# Masuk ke folder proyek aktif Anda
 cd /root/web-cctv
 ```
 
-### Langkah 2: Menjalankan Script Autostart Systemd (Otomatis Sekali Klik)
-Kami telah menyediakan script instalasi otomatis `install-autostart.sh` yang akan mengonfigurasi semua kebutuhan dependensi, database SQLite, file `.env`, dan layanan systemd:
+### Langkah 2: Eksekusi Skrip Autostart (Sekali Klik)
+Jalankan skrip instalasi otomatis `install-autostart.sh` untuk mengunduh semua perangkat lunak pendukung, mengonfigurasi database, berkas `.env`, dan mendaftarkan layanan systemd:
 
 ```bash
-# Berikan izin eksekusi pada installer
+# Berikan hak akses eksekusi
 chmod +x install-autostart.sh
 
-# Jalankan installer dengan hak akses ROOT (sudo)
+# Jalankan skrip sebagai ROOT (sudo)
 sudo ./install-autostart.sh
 ```
 
-**Apa yang dilakukan oleh script ini?**
-1. Memperbarui indeks repositori dan mengunduh dependensi (`nodejs`, `npm`, `ffmpeg`, `sqlite3`, `rsync`).
-2. Melakukan instalasi dependensi produksi Node.js menggunakan `npm install --omit=dev`.
-3. Membuat database SQLite dan menjalankan skrip inisialisasi awal (`init-db.js`).
-4. Menyiapkan konfigurasi file `.env` yang optimal.
-5. Memasang unit layanan systemd `/etc/systemd/system/webcctv.service` agar **aplikasi otomatis berjalan saat STB menyala (setelah mati lampu atau reboot)**.
+**Hasil Instalasi:**
+* Semua dependensi Linux (`nodejs`, `npm`, `ffmpeg`, `sqlite3`, `rsync`) otomatis terpasang.
+* Dependensi Node.js diinstal secara bersih menggunakan `npm install --omit=dev`.
+* Database SQLite diinisialisasi melalui `init-db.js`.
+* Layanan **`webcctv.service`** didaftarkan di systemd agar **aplikasi otomatis berjalan kembali saat STB menyala (setelah mati lampu atau reboot)**.
 
-### Langkah 3: Mengendalikan Layanan Web-CCTV
-Anda dapat memantau dan mengendalikan layanan CCTV menggunakan perintah systemd berikut:
-
+### Langkah 3: Perintah Pengendalian Layanan
 ```bash
 # Memeriksa status berjalan layanan Web-CCTV
 sudo systemctl status webcctv
@@ -70,22 +106,19 @@ sudo systemctl stop webcctv
 # Memulai ulang (restart) layanan
 sudo systemctl restart webcctv
 
-# Memantau log aktivitas server secara live (real-time)
+# Memantau aktivitas log server secara real-time
 sudo journalctl -u webcctv -f
 ```
-
-Aplikasi Web-CCTV Anda kini sudah dapat diakses secara lokal di: **`http://<IP_STB_ANDA>:3000`**
-* **Username Admin**: `admin` | **Password**: `admin123`
-* **Username Publik**: `publik` | **Password**: `publik123`
+Aplikasi Web-CCTV kini dapat diakses secara lokal di: **`http://<IP_STB_ANDA>:3000`**
 
 ---
 
-## 💾 2. Kustomisasi & Pemindahan Penyimpanan ke Hardisk USB 500GB
+## 💾 3. Kustomisasi Penyimpanan & Proteksi Hardisk 500GB
 
-Sangat dilarang menyimpan hasil rekaman video terus-menerus di dalam **SD Card (MicroSD)** STB karena proses tulis-baca (*write endurance*) yang tinggi akan merusak SD Card Anda dalam hitungan bulan. Gunakan USB Harddisk Eksternal berkapasitas 500GB!
+Sangat dilarang menyimpan hasil rekaman video terus-menerus ke dalam **SD Card (MicroSD)** STB karena proses tulis-baca (*write endurance*) yang tinggi akan merusak SD Card Anda dalam hitungan bulan. Gunakan USB Harddisk Eksternal berkapasitas 500GB!
 
-### A. Konfigurasi Auto-Mount Hardisk Permanen
-Gunakan script otomatisasi aman `mount-hdd.sh` untuk melakukan format, mounting permanen di fstab, dan pengaturan symlink:
+### A. Konfigurasi Auto-Mount Permanen
+Gunakan script otomatisasi aman `mount-hdd.sh` untuk melakukan format, mounting permanen di fstab, dan pengaturan pengaman:
 
 ```bash
 # Berikan izin eksekusi pada script mount
@@ -94,54 +127,43 @@ chmod +x mount-hdd.sh
 # Jalankan sebagai ROOT
 sudo ./mount-hdd.sh
 ```
+*Pilih opsi **y** jika ingin memformat hardisk baru ke sistem berkas Ext4 Linux (Sangat Direkomendasikan), atau pilih **n** jika hardisk sudah memiliki data rekaman.*
 
-**Fitur Hebat Script Mount Ini:**
-* **Deteksi Otomatis**: Mengenali hardisk USB berukuran ~500GB (terbaca ~465G di Linux).
-* **Format Aman Ext4**: Memformat hardisk ke sistem berkas Ext4 Linux untuk kecepatan transfer data terbaik dan nol fragmentasi file video.
-* **Proteksi Fstab (`nofail`)**: Menambahkan UUID hardisk secara permanen di `/etc/fstab` dengan opsi `nofail`. Jika hardisk tidak sengaja dicabut, STB **tidak akan crash/hang** dan tetap booting secara normal.
-* **Fitur Ganda Double-Protection v2.7 (SANGAT PENTING)**:
-  Sebelumnya, penyimpanan hanya mengandalkan symlink Linux `public/records` yang sangat rapuh (mudah tertimpa/terhapus saat deployment ulang proyek). 
-  Di versi **v2.7**, kami memperkenalkan variabel lingkungan `RECORD_DIR` di berkas `.env`:
-  ```text
-  RECORD_DIR=/var/lib/webcctv/records
-  ```
-  Script `mount-hdd.sh` secara otomatis menyuntikkan konfigurasi ini ke dalam `.env` proyek Anda. Walaupun symlink terhapus atau folder ter-overtulis, server **akan tetap menulis data langsung ke Hardisk 500GB secara aman!**
+### B. Fitur Ganda Double-Protection v2.7 (SANGAT KRUSIAL)
+Hardisk USB pada STB rawan terputus (*unmount*) sendiri secara tiba-tiba akibat **drop tegangan / arus USB port STB yang lemah** saat piringan berputar kencang. 
 
-### B. Cara Migrasi Rekaman Lama dari SD Card ke Hardisk 500GB
-Jika Anda terlanjur merekam ke dalam SD Card dan ingin memindahkannya ke Hardisk yang baru dipasang, jalankan perintah ini di terminal STB Anda:
-
-```bash
-# 1. Hentikan server CCTV
-sudo systemctl stop webcctv
-
-# 2. Pindahkan file video secara aman menggunakan rsync
-if [ -d "/root/web-cctv/public/records" ]; then
-  sudo mkdir -p /var/lib/webcctv/records
-  sudo rsync -av --remove-source-files /root/web-cctv/public/records/ /var/lib/webcctv/records/
-  sudo rm -rf /root/web-cctv/public/records
-fi
-
-# 3. Buat symlink fallback
-sudo ln -sf /var/lib/webcctv/records /root/web-cctv/public/records
-
-# 4. Atur izin kepemilikan folder di hardisk agar server bisa menulis berkas
-sudo chown -R root:root /var/lib/webcctv/records
-sudo chmod -R 777 /var/lib/webcctv/records
-
-# 5. Jalankan kembali server
-sudo systemctl start webcctv
-```
+Untuk melindungi SD Card dari kepenuhan file video akibat unmount mendadak, kami merancang pengaman **Double-Protection**:
+1. **Berkas Pengaman (`.cctv_hdd_active`)**: Skrip `mount-hdd.sh` akan menulis file tersembunyi bernama `.cctv_hdd_active` ke dalam piringan hardisk Anda setelah sukses ter-mount.
+2. **Sistem Auto-Mount Ulang & Proteksi SD Card**: Sebelum memulai rekaman, fungsi `startRecord` di `server.js` akan memeriksa keberadaan berkas `.cctv_hdd_active` tersebut. Jika tidak ditemukan (unmount terdeteksi):
+   - Server secara otomatis mengeksekusi shell asinkron **`mount -a`** untuk mencoba mengaitkan kembali hardisk Anda.
+   - Jika upaya mount ulang gagal (kabel USB lepas atau mati daya), **server akan secara paksa membatalkan proses perekaman** dan memunculkan error di log database. SD Card Anda **100% aman dan bebas dari bahaya kepenuhan data rekaman**!
 
 ---
 
-## 🔄 3. Sinkronisasi Basis Data (`sync-db-records.js`)
+## 🔐 4. Pembagian Izin Hak Akses Kamera (RBAC)
+
+Sistem Web-CCTV v2.7 memisahkan hak akses pemantauan kamera secara ketat berdasarkan peran akun pengguna (*Role*):
+
+1. **Administrator (`role: 'admin'`)**:
+   - Memiliki **Hak Akses Penuh (Full Access)**.
+   - Dapat melihat, memutar, dan memantau seluruh kamera yang terdaftar di database.
+   - Berhak menentukan kamera mana yang boleh dipublikasikan pada tab **Kelola Kamera** dengan mengubah pilihan kolom **"Publik (Hanya Lihat)"** (`is_public = 1` atau `0`).
+   - Berhak memproses rekaman manual, menjadwalkan perekaman otomatis, mengelola pengguna, dan mengubah pengaturan nama aplikasi/running text.
+
+2. **Publik / Akun Baru (`role: 'public'`)**:
+   - Memiliki **Hak Akses Terbatas (Restricted Access)**.
+   - **Hanya diizinkan melihat kamera aktif yang diberi centang Publik oleh Admin (`is_public = 1`)**.
+   - Kamera privat yang tidak diizinkan admin otomatis **disaring dan disensor** dari database, peta lokasi, maupun API streaming, sehingga tidak dapat diretas.
+   - **Sensor Kredensial**: Detail URL RTSP asli disensor penuh (`rtsp_url = ''`) saat dikirim ke akun publik demi mencegah kebocoran password kamera IP.
+   - Hanya diberikan akses menu sidebar: **Dasbor**, **Live CCTV**, **Peta Lokasi**, dan **Pengaturan Akun** (hanya formulir ubah username & password akun mereka sendiri).
+
+---
+
+## 🔄 5. Sinkronisasi Basis Data (`sync-db-records.js`)
 
 Jika Anda menghapus berkas video rekaman secara fisik langsung dari Hardisk (baik melalui terminal atau pengelola file), database SQLite akan menyimpan riwayat rekaman kosong tersebut (menjadi "Ghost Records" / rekaman hantu).
 
-Kami telah menyediakan skrip **`sync-db-records.js`** yang secara cerdas:
-1. Memindai database aktif (otomatis mendeteksi database aktif systemd `/var/lib/webcctv/cctv.db` atau folder lokal).
-2. Memeriksa ketersediaan file fisik di hardisk eksternal.
-3. Menghapus log-log yang file fisiknya sudah tiada agar tampilan Web UI Anda bersih dan akurat.
+Kami telah menyediakan skrip **`sync-db-records.js`** yang secara cerdas mendeteksi database aktif, memeriksa ketersediaan berkas di hardisk eksternal, dan menghapus log-log yang file fisiknya sudah tiada agar tampilan Web UI Anda tetap akurat.
 
 Jalankan perintah ini untuk melakukan sinkronisasi secara manual:
 ```bash
@@ -160,7 +182,7 @@ sudo crontab -e
 
 ---
 
-## 🌐 4. Meng-online-kan Akses via Cloudflare Tunnel (HTTPS Gratis)
+## 🌐 6. Meng-online-kan Akses via Cloudflare Tunnel (HTTPS Gratis)
 
 Cloudflare Tunnel (`cloudflared`) memungkinkan Anda mengakses CCTV dari jaringan internet luar secara aman (HTTPS) tanpa harus berlangganan IP Public statis dan tanpa membuka port modem (Bypass CGNAT ISP).
 
@@ -204,7 +226,7 @@ Kini Web-CCTV Anda dapat diakses di mana saja melalui: **`https://cctv.domainand
 
 ---
 
-## 📱 5. Kompilasi APK Android Studio Hybrid (Smart Auto-Ping)
+## 📱 7. Kompilasi APK Android Studio Hybrid (Smart Auto-Ping)
 
 Untuk akses instan lewat ponsel Android, kami menyediakan proyek kode sumber lengkap di direktori `android-app/` dan file kompresi `web-cctv-hg680p-v2.7-android.zip`.
 
@@ -215,36 +237,12 @@ Untuk akses instan lewat ponsel Android, kami menyediakan proyek kode sumber len
 * **Penyimpanan Persisten**: Alamat lokal & domain awan Anda disimpan di `SharedPreferences` sehingga Anda hanya perlu memasukkannya sekali saja pada saat instalasi pertama kali.
 
 ### Cara Build APK di Android Studio:
-1. Buka **Android Studio** di komputer Anda, lalu klik **Open an Existing Project** dan arahkan ke folder `android-app/` di proyek ini.
+1. Buka **Android Studio** di komputer Anda, lalu klik **Open an Existing Project** and arahkan ke folder `android-app/` di proyek ini.
 2. Pastikan file `build.gradle` sinkron dan dependensi AndroidX terunduh sempurna.
 3. Klik menu **Build** -> **Build Bundle(s) / APK(s)** -> **Build APK(s)**.
 4. Salin file `.apk` hasil kompilasi ke HP Android Anda, jalankan instalasi, dan konfigurasikan alamat IP lokal serta alamat Cloudflare Tunnel Anda.
 
 ---
 
-## 🧹 6. Pemeliharaan Jangka Panjang & Troubleshooting
-
-### A. Penyebab "Layar Hitam / Blank Hitam" pada Hasil Rekaman
-* **Penyebab**: Format masukan kamera adalah H.265 (HEVC), sedangkan peramban web hanya menduduki H.264. Jika Anda mematikan proses transcoding, file MP4 akan disalin mentah (tetap H.265) yang tidak bisa dirender browser.
-* **Solusi**: Pastikan setelan perekaman di `server.js` Anda menggunakan formula `-c:v libx264` dengan preset `ultrafast` (sudah terkonfigurasi secara default di rilis v2.7 ini).
-
-### B. Cara Mengubah Parameter Kualitas Video Rekaman
-Anda dapat menyesuaikan resolusi gambar, fps, dan bitrate di berkas `.env` Anda tanpa harus menyentuh kode program:
-```ini
-# Edit file .env Anda
-VIDEO_SIZE=960x540      # Resolusi (Ganti ke 640x360 jika ingin CPU STB lebih dingin lagi!)
-VIDEO_FPS=15            # Frame rate optimal CCTV
-VIDEO_BITRATE=800k      # Kepadatan data video
-```
-Simpan perubahan dan restart server dengan perintah `sudo systemctl restart webcctv`.
-
-### C. Pembersihan Log Server Otomatis
-Layanan `webcctv.service` mencatat semua aktivitas FFmpeg ke journald. Untuk membatasi ukuran berkas log logrotate agar memori internal STB tetap lega:
-```bash
-sudo journalctl --vacuum-size=50M
-```
-
----
-
 *Dikembangkan dengan penuh dedikasi untuk komunitas STB Armbian Indonesia.*
-**Web-CCTV HG680P v2.7 (Multi-Language & Smart Mobile Hybrid Edition)**
+**Web-CCTV HG680P v2.7 (Responsive Mobile, Secure Access & Smart Storage)**

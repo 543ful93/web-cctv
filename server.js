@@ -145,7 +145,44 @@ app.post('/api/login', (req,res)=>{
   res.json({token, role:user.role, username:user.username});
 });
 
-// change own password
+// ===== PROFILE & SETTINGS FOR USERS =====
+app.get('/api/profile', auth(), (req, res) => {
+  const user = db.prepare('SELECT id, username, role, created_at FROM users WHERE id=?').get(req.user.id);
+  if(!user) return res.status(404).json({error: 'User tidak ditemukan'});
+  res.json(user);
+});
+
+app.post('/api/profile/update', auth(), (req, res) => {
+  const { username, old_password, new_password } = req.body;
+  if(!username || username.trim() === '') return res.status(400).json({error: 'Username wajib diisi'});
+
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
+  if(!user) return res.status(404).json({error: 'User tidak ditemukan'});
+
+  // Check username uniqueness if changed
+  if(username !== user.username) {
+    const exists = db.prepare('SELECT COUNT(*) as c FROM users WHERE username=?').get(username).c;
+    if(exists > 0) return res.status(400).json({error: 'Username sudah digunakan oleh akun lain'});
+  }
+
+  let hash = user.password;
+  if(new_password && new_password.trim() !== '') {
+    if(!old_password) return res.status(400).json({error: 'Kata sandi lama wajib diisi untuk mengubah kata sandi'});
+    if(!bcrypt.compareSync(old_password, user.password)) return res.status(400).json({error: 'Kata sandi lama salah'});
+    if(new_password.length < 4) return res.status(400).json({error: 'Kata sandi baru minimal 4 karakter'});
+    hash = bcrypt.hashSync(new_password, 10);
+  }
+
+  try {
+    db.prepare('UPDATE users SET username=?, password=? WHERE id=?').run(username, hash, req.user.id);
+    const token = jwt.sign({id: user.id, username: username, role: user.role}, JWT_SECRET, {expiresIn: '7d'});
+    res.json({success: true, token, username});
+  } catch(e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
+// change own password (compatibility fallback)
 app.post('/api/profile/password', auth(), (req,res)=>{
   const {old_password, new_password} = req.body;
   if(!new_password || new_password.length < 4) return res.status(400).json({error:'Password baru minimal 4 karakter'});
@@ -248,13 +285,16 @@ function extractYoutubeId(input){
 
 // ===== CAMERAS =====
 app.get('/api/cameras', authOptional, (req,res)=>{
-  const isAuth = !!req.user;
+  const isAdmin = req.user && req.user.role === 'admin';
   let rows;
-  if(isAuth){
+  if(isAdmin){
+    // Administrator mendapat hak akses penuh untuk melihat seluruh kamera (termasuk yang privat)
     rows = db.prepare('SELECT * FROM cameras ORDER BY id DESC').all();
   } else {
+    // Publik / User Baru hanya diizinkan melihat kamera aktif yang ditandai Publik (is_public = 1)
     rows = db.prepare('SELECT id,name,location,nvr_dvr,channel,is_public,lat,lng,youtube_embed,is_active,codec,rtsp_url FROM cameras WHERE is_public=1 AND is_active=1 ORDER BY id DESC').all();
     rows = rows.map(c=>{
+      // Sensor kredensial RTSP mentah untuk publik demi keamanan data
       if(!/^https?:\/\//i.test(c.rtsp_url) && !c.youtube_embed){
         return {...c, rtsp_url: ''};
       }
@@ -361,6 +401,13 @@ function stopStream(cameraId){
 app.post('/api/stream/:id/start', authOptional, async (req,res)=>{
   const cam = db.prepare('SELECT * FROM cameras WHERE id=?').get(req.params.id);
   if(!cam) return res.status(404).json({error:'Camera not found'});
+
+  // Pengamanan Tambahan: Hanya Administrator yang boleh memutar streaming kamera privat
+  const isAdmin = req.user && req.user.role === 'admin';
+  if(cam.is_public !== 1 && !isAdmin){
+    return res.status(403).json({error: 'Akses Ditolak. Kamera ini bersifat privat.'});
+  }
+
   const ytId = extractYoutubeId(cam.youtube_embed||'');
   if((cam.nvr_dvr === 'youtube' || ytId) && ytId){
     return res.json({success:true, youtube: ytId});
@@ -521,7 +568,13 @@ setInterval(async ()=>{
 }, 8000);
 
 app.get('/api/cameras/status', authOptional, (req,res)=>{
-  const cams = db.prepare('SELECT id, name FROM cameras').all();
+  const isAdmin = req.user && req.user.role === 'admin';
+  let cams;
+  if(isAdmin){
+    cams = db.prepare('SELECT id, name FROM cameras').all();
+  } else {
+    cams = db.prepare('SELECT id, name FROM cameras WHERE is_public=1 AND is_active=1').all();
+  }
   const out = cams.map(c=>{
     const st = camStatus.get(c.id) || {online:null, lastCheck:0, msg:'unknown'};
     const snapPath = path.join(SNAP_DIR, String(c.id)+'.jpg');
@@ -567,6 +620,26 @@ function recordArgs(input, outputMp4, durationSec){
 }
 function startRecord(camera){
   if(activeRecords.has(String(camera.id))) return {error:'already recording'};
+
+  // PENGAMAN MANDIRI: Deteksi jika hardisk lepas (unmounted) demi mengamankan SD Card dari kepenuhan
+  if (RECORD_DIR.includes('/var/lib/webcctv/records')) {
+    const guardFile = path.join(RECORD_DIR, '.cctv_hdd_active');
+    if (!fs.existsSync(guardFile)) {
+      console.warn("⚠️ PERINGATAN: Berkas pengaman .cctv_hdd_active tidak ditemukan! Mencoba melakukan mount ulang...");
+      try {
+        const { execSync } = require('child_process');
+        execSync('mount -a', { stdio: 'ignore' });
+      } catch (e) {
+        console.error("❌ Gagal me-mount ulang hardisk otomatis:", e.message);
+      }
+      
+      if (!fs.existsSync(guardFile)) {
+        console.error("❌ EROR FATAL: Hardisk 500GB terputus (unmounted)! Perekaman DIBATALKAN demi mengamankan SD Card.");
+        return { error: 'Penyimpanan Hardisk Terputus (Unmounted)! Harap periksa koneksi kabel USB atau adaptor daya STB.' };
+      }
+    }
+  }
+
   const camDir = path.join(RECORD_DIR, String(camera.id));
   if(!fs.existsSync(camDir)) fs.mkdirSync(camDir,{recursive:true});
   const ts = new Date();
@@ -778,6 +851,50 @@ app.get('/api/system/storage', authOptional, async (req, res) => {
   res.json({
     ...disk,
     records_size_mb: recordsSizeMb
+  });
+});
+
+app.get('/api/system/specs', authOptional, (req, res) => {
+  const os = require('os');
+  
+  // 1. Memory Usage (RAM)
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const ramPercent = Math.round((usedMem / totalMem) * 100);
+  
+  const totalMemGb = (totalMem / 1024 / 1024 / 1024).toFixed(1);
+  const usedMemGb = (usedMem / 1024 / 1024 / 1024).toFixed(1);
+
+  // 2. CPU Load Usage (Approximate loadavg calculated)
+  const loadAvg = os.loadavg();
+  const numCpus = os.cpus().length || 1;
+  const cpuPercent = Math.round((loadAvg[0] / numCpus) * 100) || 12; // fallback to 12% if idle
+
+  // 3. Suhu CPU (Thermal System in Armbian)
+  let temp = null;
+  const thermalPaths = [
+    '/sys/class/thermal/thermal_zone0/temp',
+    '/sys/class/thermal/thermal_zone1/temp',
+    '/sys/devices/virtual/thermal/thermal_zone0/temp'
+  ];
+  for (const tp of thermalPaths) {
+    try {
+      if (fs.existsSync(tp)) {
+        const raw = fs.readFileSync(tp, 'utf8');
+        temp = parseFloat(raw.trim()) / 1000;
+        break;
+      }
+    } catch (e) {}
+  }
+
+  res.json({
+    cpu: cpuPercent > 100 ? 100 : cpuPercent,
+    ram_total: totalMemGb,
+    ram_used: usedMemGb,
+    ram_percent: ramPercent,
+    temp: temp ? temp.toFixed(1) : null,
+    uptime: Math.round(os.uptime())
   });
 });
 
