@@ -244,5 +244,16 @@ Untuk akses instan lewat ponsel Android, kami menyediakan proyek kode sumber len
 
 ---
 
+## ☕ Dukungan & Donasi
+
+Jika proyek **Web-CCTV HG680P v2.7** ini bermanfaat bagi Anda, pos ronda, lingkungan warga, atau instansi Anda, silakan berikan dukungan dan donasi kepada pengembang agar proyek ini terus diperbarui:
+
+*   **SeaBank**: `901860644518`
+*   **DANA**: `089521640440`
+
+Setiap kontribusi Anda sangat berarti untuk mendukung pengembangan perangkat lunak berbasis komunitas ini. Terima kasih banyak atas dukungan dan kebaikan Anda! 🙏
+
+---
+
 *Dikembangkan dengan penuh dedikasi untuk komunitas STB Armbian Indonesia.*
 **Web-CCTV HG680P v2.7 (Responsive Mobile, Secure Access & Smart Storage)**
