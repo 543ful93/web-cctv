@@ -99,7 +99,7 @@
         </button>
       </div>
 
-      <!-- Navigation Menu -->
+      <!-- Navigation Menu (Desktop & Drawer list) -->
       <nav id="nav-menu" class="flex-1 flex flex-col p-3 space-y-1 overflow-y-auto">
         <button data-view="dashboard" class="nav-item flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium transition text-slate-300 hover:bg-slate-800 hover:text-white">
           <i class="fa-solid fa-chart-line w-5 text-center"></i>
@@ -330,6 +330,7 @@
 
           <!-- Grid Layout -->
           <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <!-- Sidebar: Cameras List -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col h-[400px] lg:h-[500px]">
               <div class="mb-3">
                 <h3 class="font-bold text-sm text-slate-200 mb-2 flex items-center justify-between">
@@ -346,6 +347,7 @@
               </div>
             </div>
 
+            <!-- Map Column -->
             <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden h-[400px] lg:h-[500px] relative z-10">
               <div id="map" class="w-full h-full"></div>
             </div>
@@ -359,37 +361,45 @@
               <h2 class="text-xl md:text-2xl font-bold tracking-tight" data-i18n="records_title">File Rekaman MP4</h2>
               <p class="text-slate-400 text-xs md:text-sm" data-i18n="records_sub">Unduh atau tonton rekaman terjadwal dan manual kamera CCTV.</p>
             </div>
-            
-            <div class="flex flex-wrap items-center gap-3 self-start md:self-auto w-full md:w-auto mt-2 md:mt-0">
+            <div class="flex items-center space-x-3 self-start md:self-auto w-full md:w-auto mt-2 md:mt-0">
               <!-- Trigger manual record form button -->
               <button id="btn-show-rec-form" onclick="toggleManualRecordForm()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 border-0 shadow-lg shadow-red-500/10 cursor-pointer">
                 <i class="fa-solid fa-circle"></i>
                 <span>Record Manual</span>
               </button>
-              
-              <!-- Camera filter for records -->
-              <div class="relative w-full sm:w-40">
-                <select id="records-filter-camera" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer" onchange="loadRecords()">
-                  <option value="" data-i18n="all_cameras">Semua Kamera</option>
-                </select>
-                <i class="fa-solid fa-chevron-down absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-[10px]"></i>
-              </div>
-              
-              <!-- Date filter -->
-              <div class="relative w-full sm:w-36">
-                <input type="date" id="records-filter-date" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer" onchange="loadRecords()">
-              </div>
-              
-              <!-- Time filter -->
-              <div class="relative w-full sm:w-28">
-                <input type="time" id="records-filter-time" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer" onchange="loadRecords()">
-              </div>
-
-              <!-- Reset filters button -->
-              <button onclick="resetRecordsFilters()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition border border-slate-700 cursor-pointer">
-                <i class="fa-solid fa-rotate-left"></i>
-              </button>
             </div>
+          </div>
+
+          <!-- Filters Toolbar (Responsive Wrapping Container) -->
+          <div class="flex flex-wrap items-center gap-3 bg-slate-900 border border-slate-800 p-3 md:p-4 rounded-xl shadow-md w-full">
+            <!-- Camera filter -->
+            <div class="relative w-full sm:w-48">
+              <select id="records-filter-camera" class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition appearance-none cursor-pointer" onchange="loadRecords()">
+                <option value="" data-i18n="all_cameras">Semua Kamera</option>
+              </select>
+              <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
+            </div>
+            
+            <!-- Date filter -->
+            <div class="relative w-36 flex-shrink-0">
+              <input type="date" id="records-filter-date" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer" onchange="loadRecords()">
+            </div>
+            
+            <!-- Time filter -->
+            <div class="relative w-28 flex-shrink-0">
+              <input type="time" id="records-filter-time" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer" onchange="loadRecords()">
+            </div>
+
+            <!-- Reset filters button -->
+            <button onclick="resetRecordsFilters()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg text-xs md:text-sm font-semibold transition border border-slate-700 cursor-pointer flex items-center justify-center" title="Reset Filters">
+              <i class="fa-solid fa-rotate-left"></i>
+            </button>
+
+            <!-- Delete all recordings button (Admin only) -->
+            <button id="btn-delete-all-records" onclick="handleDeleteAllRecords()" class="admin-only hidden bg-red-950/60 hover:bg-red-900/80 text-red-400 px-3 py-2 rounded-lg text-xs md:text-sm font-semibold transition border border-red-900/50 cursor-pointer flex items-center justify-center space-x-1.5" title="Hapus Semua Rekaman">
+              <i class="fa-solid fa-dumpster-fire"></i>
+              <span data-i18n="delete_all_records">Hapus Semua</span>
+            </button>
           </div>
 
           <!-- Hard Disk Storage status panel -->
@@ -655,7 +665,7 @@
       <div class="grid grid-cols-1 lg:grid-cols-3 overflow-y-auto max-h-[calc(95vh-60px)]">
         <div class="lg:col-span-2 bg-black flex items-center justify-center aspect-video relative">
           <video id="cctv-video" class="w-full h-full object-contain hidden" playsinline muted autoplay></video>
-          <iframe id="cctv-iframe" class="w-full h-full object-contain hidden" frameborder="0" allowfullscreen></iframe>
+          <iframe id="cctv-iframe" class="w-full h-full object-contain hidden" frameborder="0" allowfullscreen></iframe >
           
           <div id="player-splash" class="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-center p-4 space-y-3">
             <div id="player-splash-icon" class="text-blue-500 text-2xl md:text-3xl animate-spin">
@@ -715,9 +725,8 @@
             </div>
           </div>
 
-          <!-- Stream controls (Admin Only) -->
           <div id="player-admin-stream-ctrl" class="admin-only hidden space-y-2">
-            <button onclick="handleForceStopStream()" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-xs font-semibold transition flex items-center justify-center space-x-1 border-0">
+            <button onclick="handleForceStopStream()" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-xs font-semibold transition flex items-center justify-center space-x-1 border-0 cursor-pointer">
               <i class="fa-solid fa-stop text-[10px]"></i>
               <span data-i18n="stop_ffmpeg_stream">Matikan FFmpeg Stream</span>
             </button>
@@ -729,7 +738,6 @@
         </div>
       </div>
 
-      <!-- FFmpeg Log Drawer -->
       <div id="player-log-drawer" class="hidden flex-1 border-t border-slate-800 bg-slate-950 p-4 font-mono text-[10px] md:text-xs text-slate-400 overflow-y-auto max-h-[200px] select-text">
         <h4 class="font-semibold text-slate-200 mb-2 border-b border-slate-800 pb-1" data-i18n="ffmpeg_log_tail">Buntut Log Transcoder FFmpeg</h4>
         <pre id="player-log-content" class="whitespace-pre-wrap leading-relaxed">No logs available</pre>
@@ -760,7 +768,7 @@
 
   <!-- ================= MODAL: CAMERA FORM (ADD/EDIT) ================= -->
   <div id="modal-camera-form" class="fixed inset-0 bg-slate-950/80 hidden items-center justify-center p-2 md:p-4 z-[150]">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col my-auto">
       <div class="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
         <h3 id="camera-form-title" class="font-bold text-sm md:text-base text-white">Tambah Kamera</h3>
         <button onclick="closeCameraFormModal()" class="text-slate-400 hover:text-white hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center transition flex-shrink-0 bg-transparent border-0 cursor-pointer">

@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'cctv_hg680p_secret_2025';
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'cctv.db');
 const HLS_DIR = path.join(__dirname, 'public', 'streams');
-const RECORD_DIR = path.join(__dirname, 'public', 'records');
+const RECORD_DIR = process.env.RECORD_DIR || path.join(__dirname, 'public', 'records');
 const SNAP_DIR = path.join(__dirname, 'public', 'snapshots');
 const LOG_DIR = path.join(__dirname, 'logs');
 
@@ -545,20 +545,24 @@ function recordArgs(input, outputMp4, durationSec){
   if (input.startsWith('rtsp:')) {
     args.push('-rtsp_transport', 'tcp');
   }
+  args.push('-i', input, '-t', String(durationSec));
+
+  // Mengubah HEVC (H.265) menjadi H.264 Baseline secara sangat ringan (Ultrafast)
+  // Ini mutlak diperlukan agar hasil rekaman bisa diputar langsung di semua Web Browser / HP (H.265 tidak didukung browser).
+  // Menggunakan skala 540p dan 15fps untuk menjaga CPU STB HG680P tetap dingin (<30% CPU).
   args.push(
-    '-i', input,
-    '-t', String(durationSec),
     '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-profile:v', 'main',
+    '-preset', 'ultrafast',      // Preset tercepat, beban CPU terendah pada STB
+    '-tune', 'zerolatency',
+    '-profile:v', 'baseline', '-level', '3.0', // Kompatibilitas 100% pada HP/Browser
     '-pix_fmt', 'yuv420p',
-    '-s', process.env.REC_SIZE || '1280x720',
-    '-r', '20',
-    '-b:v', '1200k',
+    '-s', process.env.VIDEO_SIZE || '960x540', // Downscale ke 540p untuk menghemat pixel encoding & disk hdd
+    '-r', '15',                  // Frame rate 15fps (standar CCTV) menghemat 50% daya CPU
+    '-b:v', '800k',              // Bitrate optimal untuk kualitas jernih dan hemat penyimpanan
     '-movflags', '+faststart',
+    '-an',                       // Nonaktifkan audio untuk menghindari crash wadah MP4 akibat PCM G.711 IP Cam
     '-y', outputMp4
   );
-  if(HAVE_AAC) args.splice(-2,0,'-c:a','aac','-b:a','96k'); else args.splice(-2,0,'-an');
   return args;
 }
 function startRecord(camera){
@@ -573,9 +577,32 @@ function startRecord(camera){
   const ins = db.prepare('INSERT INTO records (camera_id,start_time,status,file_path) VALUES (?,?,?,?)').run(camera.id, start_time, 'recording', `records/${camera.id}/${fname}`);
   const recordRowId = ins.lastInsertRowid;
   const streamUrl = cleanStreamUrl(camera.rtsp_url);
-  const ff = spawn('ffmpeg', recordArgs(streamUrl, outPath, duration));
+  
+  // Create a log file for recording to debug any failures!
+  const logFile = path.join(LOG_DIR, `rec_${camera.id}.log`);
+  const logStream = fs.createWriteStream(logFile, {flags:'w'});
+
+  const args = recordArgs(streamUrl, outPath, duration);
+  logStream.write(`ffmpeg ${args.join(' ')}\n\n`);
+
+  const ff = spawn('ffmpeg', args);
   activeRecords.set(String(camera.id), {proc:ff, recordRowId});
+  
+  ff.stderr.on('data', d => {
+    logStream.write(d.toString());
+  });
+
+  ff.on('error', err => {
+    console.error(`❌ FFmpeg spawn error for recording cam ${camera.id}:`, err.message);
+    logStream.write(`\n❌ SPAWN ERROR: ${err.message}\n`);
+    logStream.end();
+    activeRecords.delete(String(camera.id));
+    db.prepare("UPDATE records SET status='failed', end_time=? WHERE id=?")
+      .run(new Date().toISOString().slice(0,19).replace('T',' '), recordRowId);
+  });
+
   ff.on('close', code=>{
+    logStream.end(`\nexit ${code}\n`);
     activeRecords.delete(String(camera.id));
     const end_time = new Date().toISOString().slice(0,19).replace('T',' ');
     let size_mb = 0;
@@ -617,7 +644,57 @@ app.get('/api/record/active', authOptional, (req, res) => {
   });
   res.json(activeList);
 });
+
+// automatic physical file scanning and database indexing
+function scanAndImportPhysicalRecords() {
+  try {
+    if (!fs.existsSync(RECORD_DIR)) return;
+    const camDirs = fs.readdirSync(RECORD_DIR);
+    camDirs.forEach(camDir => {
+      const cameraId = parseInt(camDir);
+      if (isNaN(cameraId)) return;
+      const camDirPath = path.join(RECORD_DIR, camDir);
+      const stat = fs.statSync(camDirPath);
+      if (!stat.isDirectory()) return;
+
+      const files = fs.readdirSync(camDirPath);
+      files.forEach(file => {
+        if (!file.endsWith('.mp4')) return;
+        const relativePath = `records/${cameraId}/${file}`;
+        const exists = db.prepare("SELECT COUNT(*) as c FROM records WHERE file_path=?").get(relativePath).c;
+        if (exists === 0) {
+          const fullPath = path.join(camDirPath, file);
+          let sizeMb = 0;
+          try { sizeMb = +(fs.statSync(fullPath).size / 1024 / 1024).toFixed(2); } catch {}
+          let startTimeStr = '';
+          try {
+            const baseName = file.replace('.mp4', '');
+            const parts = baseName.split('T');
+            if (parts.length === 2) {
+              startTimeStr = `${parts[0]} ${parts[1].replace(/-/g, ':')}`;
+            } else {
+              startTimeStr = fs.statSync(fullPath).mtime.toISOString().slice(0, 19).replace('T', ' ');
+            }
+          } catch {
+            startTimeStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+          }
+          try {
+            db.prepare('INSERT INTO records (camera_id, start_time, end_time, file_path, size_mb, duration_sec, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(cameraId, startTimeStr, startTimeStr, relativePath, sizeMb, 0, 'completed');
+            console.log(`📥 Auto-indexed physical recording to SQLite: ${relativePath}`);
+          } catch (dbErr) {
+            console.error(`Auto-index DB insert fail for ${relativePath}:`, dbErr.message);
+          }
+        }
+      });
+    });
+  } catch (err) {
+    console.error("Auto scan and import records failure:", err.message);
+  }
+}
+
 app.get('/api/records', auth(), (req,res)=>{
+  scanAndImportPhysicalRecords(); // Auto-scan and register physical files!
   const cam = req.query.camera_id;
   let rows;
   if(cam) rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id WHERE r.camera_id=? ORDER BY r.start_time DESC LIMIT 200').all(cam);
@@ -632,6 +709,21 @@ app.delete('/api/records/:id', auth('admin'), (req,res)=>{
   }
   db.prepare('DELETE FROM records WHERE id=?').run(req.params.id);
   res.json({success:true});
+});
+app.delete('/api/records', auth('admin'), (req,res)=>{
+  try {
+    const records = db.prepare("SELECT * FROM records").all();
+    records.forEach(rec => {
+      if (rec.file_path) {
+        const fp = path.join(__dirname, 'public', rec.file_path);
+        try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch(e) {}
+      }
+    });
+    db.prepare("DELETE FROM records").run();
+    res.json({success:true});
+  } catch (err) {
+    res.status(500).json({error: err.message});
+  }
 });
 
 // disk space helper

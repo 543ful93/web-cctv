@@ -62,6 +62,7 @@ if [ ! -f "$APP_DIR/.env" ]; then
 PORT=3000
 JWT_SECRET=cctv_hg680p_secret_ganti_ini_please
 DB_PATH=/var/lib/webcctv/cctv.db
+RECORD_DIR=/var/lib/webcctv/records
 VIDEO_SIZE=960x540
 VIDEO_FPS=15
 VIDEO_BITRATE=800k

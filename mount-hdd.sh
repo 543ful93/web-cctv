@@ -154,6 +154,16 @@ if [ -d "$PROJECT_DIR" ]; then
     ln -sf "$MOUNT_DIR" "$PROJECT_DIR/public/records"
     echo -e "${GREEN}Symlink dibuat: $PROJECT_DIR/public/records -> $MOUNT_DIR${NC}"
     
+    # Perbarui file .env agar server selalu menulis langsung ke Hardisk tanpa tergantung symlink (Double-Protection!)
+    if [ -f "$PROJECT_DIR/.env" ]; then
+        if grep -q "RECORD_DIR=" "$PROJECT_DIR/.env"; then
+            sed -i "s|RECORD_DIR=.*|RECORD_DIR=$MOUNT_DIR|g" "$PROJECT_DIR/.env"
+        else
+            echo "RECORD_DIR=$MOUNT_DIR" >> "$PROJECT_DIR/.env"
+        fi
+        echo -e "${GREEN}Konfigurasi .env diperbarui: RECORD_DIR=$MOUNT_DIR${NC}"
+    fi
+    
     # Restart the service to apply everything cleanly
     echo -e "${YELLOW}6. Memulai ulang layanan Web-CCTV...${NC}"
     systemctl restart webcctv 2>/dev/null || pm2 restart server 2>/dev/null || node "$PROJECT_DIR/server.js" &

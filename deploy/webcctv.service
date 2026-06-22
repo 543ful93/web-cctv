@@ -1,0 +1,17 @@
+[Unit]
+Description=Web CCTV HG680P Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/webcctv
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DB_PATH=/var/lib/webcctv/cctv.db
+ExecStartPre=/usr/bin/node /opt/webcctv/init-db.js
+ExecStart=/usr/bin/node /opt/webcctv/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

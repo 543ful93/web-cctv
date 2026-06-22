@@ -3,20 +3,38 @@ const fs = require('fs');
 const path = require('path');
 
 // Web-CCTV HG680P - Database Recording Logs Sync Utility
-// This script checks all recording logs in the database, verifies if their physical MP4 files
-// exist on the newly mounted 500GB hard disk, and deletes any "ghost/invalid" entries that are missing.
+// Features: Auto-detects active DB_PATH and strictly resolves file paths to the project root folder `public/records`.
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'cctv.db');
+let DB_PATH = process.env.DB_PATH;
+if (!DB_PATH) {
+  if (fs.existsSync('/var/lib/webcctv/cctv.db')) {
+    DB_PATH = '/var/lib/webcctv/cctv.db';
+    console.log('📂 Terdeteksi database aktif systemd di: /var/lib/webcctv/cctv.db');
+  } else {
+    DB_PATH = path.join(__dirname, 'cctv.db');
+    console.log('📂 Menggunakan database lokal proyek di: ' + DB_PATH);
+  }
+}
 
 if (!fs.existsSync(DB_PATH)) {
   console.error(`❌ Error: Database tidak ditemukan di jalur: ${DB_PATH}`);
   process.exit(1);
 }
 
+// Dynamically locate the project directory
+let projectDir = __dirname;
+if (fs.existsSync('/opt/webcctv')) {
+  projectDir = '/opt/webcctv';
+} else if (fs.existsSync('/root/web-cctv')) {
+  projectDir = '/root/web-cctv';
+}
+
 const db = new Database(DB_PATH);
 
 console.log('================================================================');
 console.log('🔄  Web-CCTV - Memulai Sinkronisasi Database Rekaman & Hardisk  ');
+console.log('  - Lokasi Database: ' + DB_PATH);
+console.log('  - Lokasi Berkas  : ' + path.join(projectDir, 'public/records'));
 console.log('================================================================');
 
 try {
@@ -40,11 +58,12 @@ try {
       return;
     }
 
-    // Check if the physical file exists on the newly mounted hard drive
-    const fullPath = path.join(__dirname, 'public', rec.file_path);
+    // Always check physical file presence inside the project's public/records directory
+    // This supports both local storage and 500GB HDD mounts (since it is symlinked to public/records!)
+    const fullPath = path.join(projectDir, 'public', rec.file_path);
     
     if (!fs.existsSync(fullPath)) {
-      // Physical file is missing on the new drive, delete the ghost DB entry!
+      // Physical file is missing, delete the ghost DB entry!
       db.prepare("DELETE FROM records WHERE id=?").run(rec.id);
       deletedCount++;
     } else {

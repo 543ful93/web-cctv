@@ -100,6 +100,7 @@ const i18n = {
     rec_duration: "Durasi",
     rec_size: "Ukuran",
     records_empty: "Tidak ada file rekaman ditemukan.",
+    delete_all_records: "Hapus Semua",
     play_recording: "Putar Rekaman",
 
     // Cameras Admin View
@@ -238,6 +239,7 @@ const i18n = {
     rec_duration: "Duration",
     rec_size: "Size",
     records_empty: "No recording files found.",
+    delete_all_records: "Delete All",
     play_recording: "Play Recording",
 
     // Cameras Admin View
@@ -598,10 +600,11 @@ function navigateToView(viewId) {
     loadRecordsAndCamerasFilter();
     loadActiveRecordings();
     loadStorageStatus();
-    // Poll active recordings & storage space status every 5 seconds on recordings page
+    // Poll active recordings, storage space, and files list every 5 seconds for full real-time updates!
     liveGridInterval = setInterval(() => {
       loadActiveRecordings();
       loadStorageStatus();
+      loadRecords();
     }, 5000);
   } else if (viewId === "cameras") {
     loadAdminCameras();
@@ -1885,7 +1888,7 @@ async function loadActiveRecordings() {
 
     if (!panel || !listEl) return;
 
-    if (list.length === 0) {
+    if (!list || !Array.isArray(list) || list.length === 0) {
       panel.classList.add("hidden");
       if (recBadge) recBadge.classList.add("hidden");
       return;
@@ -1935,6 +1938,31 @@ async function stopRecordingFromPage(camId) {
     }, 500);
   } catch (err) {
     showToast(err.message, "error");
+  }
+}
+
+// Bulk delete all completed recording files and database logs
+async function handleDeleteAllRecords() {
+  const askMsg = currentLanguage === 'id' ? 
+    "⚠️ PERINGATAN: Apakah Anda yakin ingin MENGHAPUS SEMUA berkas rekaman di hardisk? Tindakan ini tidak bisa dibatalkan!" : 
+    "⚠️ WARNING: Are you sure you want to DELETE ALL recording files from the hard drive? This action cannot be undone!";
+  if (!confirm(askMsg)) return;
+
+  showLoader(currentLanguage === 'id' ? "Menghapus semua rekaman..." : "Deleting all recordings...");
+
+  try {
+    const token = safeStorage.getItem("token");
+    const headers = { "Authorization": `Bearer ${token}` };
+    const res = await fetch("/api/records", { method: "DELETE", headers });
+    if (!res.ok) throw new Error("Gagal menghapus semua rekaman");
+
+    showToast(currentLanguage === 'id' ? "Semua rekaman berhasil dibersihkan!" : "All recordings successfully deleted!", "success");
+    loadRecords();
+    loadStorageStatus();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    hideLoader();
   }
 }
 
