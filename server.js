@@ -525,47 +525,120 @@ app.get('/api/snapshot/:id', async (req,res)=>{
 });
 
 // camera status
+// camera status (Ultra-Lightweight TCP/HTTP Connection Detection)
+const net = require('net');
+const http = require('http');
+const https = require('https');
+
+function pingTcpPort(urlStr, defaultPort = 554) {
+  return new Promise((resolve) => {
+    try {
+      const cleanUrl = urlStr.replace(/^(rtsp|http|https):\/\//i, '');
+      const hostPortPart = cleanUrl.split('/')[0];
+      const hostPort = hostPortPart.split('@').pop();
+      
+      let host = hostPort;
+      let port = defaultPort;
+      
+      if (hostPort.includes(':')) {
+        const parts = hostPort.split(':');
+        host = parts[0];
+        port = parseInt(parts[1]) || defaultPort;
+      }
+      
+      const socket = new net.Socket();
+      let done = false;
+      
+      const timer = setTimeout(() => {
+        if (!done) {
+          done = true;
+          socket.destroy();
+          resolve(false);
+        }
+      }, 1500); // 1.5s timeout is perfect for fast local/public checks
+      
+      socket.connect(port, host, () => {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          socket.destroy();
+          resolve(true);
+        }
+      });
+      
+      socket.on('error', () => {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          socket.destroy();
+          resolve(false);
+        }
+      });
+    } catch (err) {
+      resolve(false);
+    }
+  });
+}
+
 const camStatus = new Map();
 async function pingCamera(cam){
   const id = cam.id;
   const streamUrl = cleanStreamUrl(cam.rtsp_url);
   const ytId = extractYoutubeId(cam.youtube_embed||'');
-  if(cam.nvr_dvr==='youtube' || ytId || isHlsUrl(streamUrl) || isHttpStream(streamUrl)){
-    camStatus.set(id, {online: cam.is_active?true:false, lastCheck: Date.now(), msg:'http/hls'});
-    return true;
+
+  // 1. YouTube Live Embed (Always online if active & internet is up)
+  if(cam.nvr_dvr === 'youtube' || ytId) {
+    camStatus.set(id, {online: cam.is_active ? true : false, lastCheck: Date.now(), msg: 'youtube cdn'});
+    return cam.is_active ? true : false;
   }
-  if(activeStreams.has(String(id))){
-    camStatus.set(id, {online:true, lastCheck:Date.now(), msg:'streaming'});
-    return true;
-  }
-  try{
-    const snapPath = path.join(SNAP_DIR, String(id)+'.jpg');
-    const st = fs.statSync(snapPath);
-    if(Date.now() - st.mtimeMs < 90000){
-      camStatus.set(id, {online:true, lastCheck:Date.now(), msg:'snapshot ok'});
-      return true;
+
+  // 2. HTTP/HLS External Streams
+  if(isHlsUrl(streamUrl) || isHttpStream(streamUrl)) {
+    try {
+      const url = new URL(streamUrl);
+      const client = url.protocol === 'https:' ? https : http;
+      const online = await new Promise(resolve => {
+        const req = client.get(streamUrl, { timeout: 1500 }, (res) => {
+          resolve(res.statusCode >= 200 && res.statusCode < 400);
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+      });
+      camStatus.set(id, {online, lastCheck: Date.now(), msg: online ? 'http ok' : 'http offline'});
+      return online;
+    } catch {
+      camStatus.set(id, {online: false, lastCheck: Date.now(), msg: 'invalid URL'});
+      return false;
     }
-  }catch{}
-  return new Promise(resolve=>{
-    const ff = spawn('ffmpeg', ['-rtsp_transport','tcp','-i', streamUrl, '-t','1','-f','null','-','-v','quiet']);
-    let done=false;
-    const timer = setTimeout(()=>{ if(!done){ done=true; try{ff.kill('SIGKILL')}catch{}; camStatus.set(id,{online:false,lastCheck:Date.now(),msg:'timeout'}); resolve(false);} }, 3500);
-    ff.on('close', code=>{
-      if(done) return; clearTimeout(timer); done=true;
-      const online = code===0;
-      camStatus.set(id,{online, lastCheck:Date.now(), msg: online?'probe ok':'probe fail '+code});
-      resolve(online);
+  }
+
+  // 3. Standard RTSP IP Cameras (Ultra-Lightweight TCP Connection Check)
+  if (streamUrl.startsWith('rtsp:')) {
+    const online = await pingTcpPort(streamUrl, 554);
+    camStatus.set(id, {
+      online,
+      lastCheck: Date.now(),
+      msg: online ? 'tcp connect ok' : 'tcp connection failed (offline)'
     });
-    ff.on('error', ()=>{ clearTimeout(timer); if(!done){ camStatus.set(id,{online:false,lastCheck:Date.now(),msg:'spawn err'}); resolve(false);} });
-  });
+    return online;
+  }
+
+  // Fallback for other formats
+  camStatus.set(id, {online: false, lastCheck: Date.now(), msg: 'unknown format'});
+  return false;
 }
-let statusIdx = 0;
-setInterval(async ()=>{
-  const cams = db.prepare('SELECT * FROM cameras WHERE is_active=1').all();
-  if(!cams.length) return;
-  const cam = cams[statusIdx % cams.length]; statusIdx++;
-  try{ await pingCamera(cam); }catch{}
-}, 8000);
+
+// Background Ping: check ALL active cameras simultaneously every 15 seconds (0% CPU spawned overhead)
+setInterval(async () => {
+  try {
+    const cams = db.prepare('SELECT * FROM cameras WHERE is_active=1').all();
+    for (const cam of cams) {
+      pingCamera(cam).catch(() => {});
+    }
+  } catch (err) {
+    console.error("Gagal melakukan berkala camera ping:", err.message);
+  }
+}, 15000);
 
 app.get('/api/cameras/status', authOptional, (req,res)=>{
   const isAdmin = req.user && req.user.role === 'admin';
