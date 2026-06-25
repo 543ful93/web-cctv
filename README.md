@@ -305,6 +305,57 @@ Jika Anda menginginkan file APK yang langsung jadi dalam 10 detik tanpa proses k
 
 ---
 
+## 🖥️ 8. Panduan Instalasi & Spesifikasi Standar PC / Laptop
+
+Selain dijalankan di STB Armbian, **Web-CCTV HG680P v2.7** sangat portabel dan dapat dijalankan dengan sangat lancar pada komputer pribadi (PC) atau Laptop berbasis **Windows, Linux (Ubuntu/Debian), atau macOS** untuk kebutuhan pengujian maupun server pemantauan mandiri.
+
+### A. Standar Spesifikasi Komputer (PC / Laptop)
+Aplikasi ini sangat ringan di sisi PC, sehingga spesifikasi minimum berikut sudah sangat mumpuni:
+
+*   **Sistem Operasi**: Windows 10/11 (64-bit), Ubuntu/Debian Linux v20.04+, atau macOS.
+*   **Prosesor (CPU)**: Intel Core i3 / AMD Ryzen 3 atau lebih tinggi (Dual-core minimal).
+*   **Memori (RAM)**: Minimal **4 GB** (Rekomendasi 8 GB agar multitasking dengan peramban lancar).
+*   **Penyimpanan (Storage)**: HDD / SSD dengan sisa kapasitas minimal 50 GB untuk folder rekaman CCTV.
+*   **Perangkat Pendukung**: Port Ethernet (LAN) atau Wi-Fi yang terhubung ke router yang sama dengan IP Camera.
+
+### B. Prasyarat Perangkat Lunak (Prerequisites)
+Sebelum menginstal, pastikan komputer Anda telah terpasang:
+1.  **Node.js**: Unduh dan instal versi LTS terbaru (v18 atau v20) dari [nodejs.org](https://nodejs.org/).
+2.  **FFmpeg**: 
+    - **Windows**: Unduh FFmpeg buatan build resmi (contoh dari *Gyan.dev*), ekstrak, dan **masukkan jalur folder `bin/` (berisi file `ffmpeg.exe`) ke dalam Variabel Lingkungan Sistem (System Environment PATH)** komputer Anda agar perintah `ffmpeg` dapat diakses dari Command Prompt (CMD).
+    - **Linux (Ubuntu/Debian)**: Pasang langsung via terminal: `sudo apt install ffmpeg -y`.
+    - **macOS**: Pasang via Homebrew: `brew install ffmpeg`.
+
+### C. Langkah-Langkah Instalasi di PC / Laptop (Windows & Linux)
+
+Jalankan perintah ini melalui **Command Prompt (CMD) / PowerShell** (untuk Windows) atau **Terminal** (untuk Linux/macOS):
+
+```bash
+# 1. Ekstrak berkas "web-cctv-hg680p-v2.7-android.zip" dan masuk ke foldernya
+cd jalur/ke/folder/web-cctv
+
+# 2. Instal dependensi produksi Node.js
+npm install --omit=dev
+
+# 3. Jalankan skrip inisialisasi awal database SQLite
+node init-db.js
+
+# 4. Buat file ".env" di folder proyek untuk konfigurasi port dan penyimpanan di PC (Opsional)
+# Windows: copy .env.example .env  | Linux: cp .env.example .env
+
+# 5. Jalankan server utama Web-CCTV
+node server.js
+```
+
+### 🖥️ Membuka Dashboard di PC:
+Setelah server berjalan, buka peramban web (Google Chrome/Edge/Firefox) Anda dan akses alamat:
+*   **Alamat Lokal**: `http://localhost:3000`
+*   **Kredensial Default**:
+    - **Administrator**: `admin` / `admin123`
+    - **Publik**: `publik` / `publik123`
+
+---
+
 ## ☕ Dukungan & Donasi
 
 Jika proyek **Web-CCTV HG680P v2.7** ini bermanfaat bagi Anda, pos ronda, lingkungan warga, atau instansi Anda, silakan berikan dukungan dan donasi kepada pengembang agar proyek ini terus diperbarui:
