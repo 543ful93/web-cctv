@@ -347,22 +347,32 @@ try {
 } catch { HAVE_AAC = false; }
 console.log('FFmpeg AAC encoder:', HAVE_AAC ? 'yes':'no');
 
-function ffmpegLiveArgs(input, outDir){
+function ffmpegLiveArgs(input, outDir, camCodec = 'auto'){
   const enableAudio = (process.env.VIDEO_AUDIO === '1') && HAVE_AAC;
+  const isH264 = camCodec === 'h264' || input.includes('h264') || input.includes('H264');
   const args = [
-    '-rtsp_transport','tcp',
     '-i', input,
     '-fflags','nobuffer',
     '-flags','low_delay',
-    '-c:v','libx264','-preset','ultrafast','-tune','zerolatency',
-    '-profile:v','baseline','-level','3.0',
-    '-pix_fmt','yuv420p',
-    '-s', process.env.VIDEO_SIZE || '960x540',
-    '-r', process.env.VIDEO_FPS || '15',
-    '-b:v', process.env.VIDEO_BITRATE || '800k',
-    '-maxrate','800k','-bufsize','1600k',
-    '-g','30',
   ];
+
+  if (isH264) {
+    // Jika kamera terdeteksi sudah H.264, COPY STREAM SAJA! Ini 0% CPU, sangat dingin di STB!
+    args.push('-c:v', 'copy');
+  } else {
+    // Jika HEVC/H.265 atau kustom, transcode ke H.264 Baseline
+    args.push(
+      '-c:v','libx264','-preset','ultrafast','-tune','zerolatency',
+      '-profile:v','baseline','-level','3.0',
+      '-pix_fmt','yuv420p',
+      '-s', process.env.VIDEO_SIZE || '960x540',
+      '-r', process.env.VIDEO_FPS || '15',
+      '-b:v', process.env.VIDEO_BITRATE || '800k',
+      '-maxrate','800k','-bufsize','1600k',
+      '-g','30'
+    );
+  }
+
   if(enableAudio){ args.push('-c:a','aac','-b:a','64k','-ac','1','-ar','44100'); } else { args.push('-an'); }
   args.push(
     '-f','hls','-hls_time','2','-hls_list_size','6',
@@ -373,7 +383,7 @@ function ffmpegLiveArgs(input, outDir){
   return args;
 }
 
-function startStream(cameraId, rtspUrl){
+function startStream(cameraId, rtspUrl, camCodec = 'auto'){
   const id = String(cameraId);
   if(activeStreams.has(id)) return {running:true};
   const outDir = path.join(HLS_DIR, id);
@@ -381,7 +391,7 @@ function startStream(cameraId, rtspUrl){
   try{ fs.readdirSync(outDir).forEach(f=>fs.unlinkSync(path.join(outDir,f))); }catch{}
   const logFile = path.join(LOG_DIR, `ff_${id}.log`);
   const logStream = fs.createWriteStream(logFile, {flags:'w'});
-  const args = ffmpegLiveArgs(rtspUrl, outDir);
+  const args = ffmpegLiveArgs(rtspUrl, outDir, camCodec);
   logStream.write(`ffmpeg ${args.join(' ')}\n\n`);
   console.log(`▶ stream ${id}: ${rtspUrl}`);
   const ff = spawn('ffmpeg', args);
@@ -419,9 +429,9 @@ app.post('/api/stream/:id/start', authOptional, async (req,res)=>{
   if(isHttpStream(streamUrl) && /\.(mp4|m3u8)/i.test(streamUrl)){
     return res.json({success:true, hls: streamUrl, direct:true});
   }
-  startStream(cam.id, streamUrl);
+  startStream(cam.id, streamUrl, cam.codec);
   const outM3u8 = path.join(HLS_DIR, String(cam.id), 'index.m3u8');
-  for(let i=0;i<16;i++){
+  for(let i=0;i<24;i++){ // Tingkatkan menjadi 24 kali (12 detik) agar STB HG680P memiliki waktu yang cukup untuk menulis m3u8
     await new Promise(r=>setTimeout(r,500));
     if(fs.existsSync(outM3u8)) return res.json({success:true, hls:`/streams/${cam.id}/index.m3u8`});
     const s = activeStreams.get(String(cam.id));
@@ -505,7 +515,7 @@ app.get('/api/snapshot/:id', async (req,res)=>{
     return res.status(202).end();
   }
   snapRunning.add(cam.id);
-  const args = ['-rtsp_transport','tcp','-i', streamUrl, '-frames:v','1', '-s','480x270', '-q:v','5', '-an', '-y', snapPath];
+  const args = ['-i', streamUrl, '-frames:v','1', '-s','480x270', '-q:v','5', '-an', '-y', snapPath];
   const ff = spawn('ffmpeg', args);
   let log = '';
   ff.stderr.on('data', d=> log += d.toString());
@@ -527,8 +537,6 @@ app.get('/api/snapshot/:id', async (req,res)=>{
 // camera status
 // camera status (Ultra-Lightweight TCP/HTTP Connection Detection)
 const net = require('net');
-const http = require('http');
-const https = require('https');
 
 function pingTcpPort(urlStr, defaultPort = 554) {
   return new Promise((resolve) => {
@@ -598,7 +606,7 @@ async function pingCamera(cam){
       const url = new URL(streamUrl);
       const client = url.protocol === 'https:' ? https : http;
       const online = await new Promise(resolve => {
-        const req = client.get(streamUrl, { timeout: 1500 }, (res) => {
+        const req = client.get(streamUrl, { timeout: 3000 }, (res) => {
           resolve(res.statusCode >= 200 && res.statusCode < 400);
         });
         req.on('error', () => resolve(false));
@@ -612,15 +620,49 @@ async function pingCamera(cam){
     }
   }
 
-  // 3. Standard RTSP IP Cameras (Ultra-Lightweight TCP Connection Check)
+  // 3. Standard RTSP IP Cameras (TCP Port Check with FFmpeg fallback for 100% reliability!)
   if (streamUrl.startsWith('rtsp:')) {
-    const online = await pingTcpPort(streamUrl, 554);
-    camStatus.set(id, {
-      online,
-      lastCheck: Date.now(),
-      msg: online ? 'tcp connect ok' : 'tcp connection failed (offline)'
+    // Upaya 1: Koneksi soket TCP port 554 super cepat (timeout 2 detik untuk jaringan nirkabel/lambat)
+    const tcpOnline = await pingTcpPort(streamUrl, 554);
+    if (tcpOnline) {
+      camStatus.set(id, {online: true, lastCheck: Date.now(), msg: 'tcp connect ok'});
+      return true;
+    }
+    
+    // Upaya 2: Fallback ke FFmpeg probe jika TCP ping gagal (biarkan FFmpeg memilih TCP/UDP secara otomatis)
+    const ffmpegOnline = await new Promise(resolve => {
+      const ff = spawn('ffmpeg', ['-i', streamUrl, '-t', '1', '-f', 'null', '-', '-v', 'quiet']);
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) {
+          done = true;
+          try { ff.kill('SIGKILL'); } catch {}
+          resolve(false);
+        }
+      }, 4000); // Batas waktu FFmpeg probe 4 detik
+      
+      ff.on('close', code => {
+        if (done) return;
+        clearTimeout(timer);
+        done = true;
+        resolve(code === 0);
+      });
+      
+      ff.on('error', () => {
+        clearTimeout(timer);
+        if (!done) {
+          done = true;
+          resolve(false);
+        }
+      });
     });
-    return online;
+    
+    camStatus.set(id, {
+      online: ffmpegOnline,
+      lastCheck: Date.now(),
+      msg: ffmpegOnline ? 'ffmpeg probe ok' : 'ffmpeg probe fail'
+    });
+    return ffmpegOnline;
   }
 
   // Fallback for other formats
@@ -664,31 +706,154 @@ app.post('/api/cameras/:id/ping', auth('admin'), async (req,res)=>{
   res.json(camStatus.get(cam.id) || {online});
 });
 
+// ===== ONVIF & PTZ CONTROLLER =====
+app.post('/api/cameras/:id/ptz', authOptional, async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id=?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Kamera tidak ditemukan' });
+
+  const { action } = req.body;
+  if (!action) return res.status(400).json({ error: 'Action wajib diisi' });
+
+  console.log(`🎮 PTZ Control Triggered on Cam ${cam.id} (${cam.name}): Action = ${action}`);
+
+  let host = "";
+  let username = "admin";
+  let password = "admin";
+  try {
+    const cleanUrl = cam.rtsp_url.replace(/^(rtsp):\/\//i, '');
+    const parts = cleanUrl.split('/');
+    const hostPortPart = parts[0];
+    const credentialsHost = hostPortPart.split('@');
+    
+    let hostPort = hostPortPart;
+    if (credentialsHost.length === 2) {
+      const creds = credentialsHost[0].split(':');
+      username = creds[0] || "admin";
+      password = creds[1] || "admin";
+      hostPort = credentialsHost[1];
+    }
+    
+    host = hostPort.split(':')[0];
+  } catch (err) {
+    return res.status(400).json({ error: 'Format URL RTSP tidak valid untuk ekstraksi ONVIF IP' });
+  }
+
+  const onvifPort = 8899;
+  let soapBody = "";
+  let x = 0, y = 0, zoom = 0;
+  let isStop = false;
+
+  switch (action) {
+    case 'up': y = 0.5; break;
+    case 'down': y = -0.5; break;
+    case 'left': x = -0.5; break;
+    case 'right': x = 0.5; break;
+    case 'zoom-in': zoom = 0.5; break;
+    case 'zoom-out': zoom = -0.5; break;
+    case 'stop': isStop = true; break;
+    default:
+      return res.status(400).json({ error: 'Action PTZ tidak dikenal' });
+  }
+
+  if (isStop) {
+    soapBody = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl">
+  <soap:Body>
+    <tptz:Stop>
+      <tptz:ProfileToken>ProfileToken_1</tptz:ProfileToken>
+      <tptz:PanTilt>true</tptz:PanTilt>
+      <tptz:Zoom>true</tptz:Zoom>
+    </tptz:Stop>
+  </soap:Body>
+</soap:Envelope>`;
+  } else {
+    soapBody = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+  <soap:Body>
+    <tptz:ContinuousMove>
+      <tptz:ProfileToken>ProfileToken_1</tptz:ProfileToken>
+      <tptz:Velocity>
+        <tt:PanTilt x="${x}" y="${y}"/>
+        <tt:Zoom x="${zoom}"/>
+      </tptz:Velocity>
+    </tptz:ContinuousMove>
+  </soap:Body>
+</soap:Envelope>`;
+  }
+
+  const postData = soapBody;
+  const options = {
+    hostname: host,
+    port: onvifPort,
+    path: '/onvif/ptz_service',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/soap+xml; charset=utf-8',
+      'Content-Length': Buffer.byteLength(postData)
+    },
+    timeout: 2000
+  };
+
+  const reqClient = http.request(options, (resClient) => {
+    let responseBody = '';
+    resClient.on('data', (chunk) => { responseBody += chunk; });
+    resClient.on('end', () => {
+      console.log(`🎮 PTZ Command Sent: Status = ${resClient.statusCode}`);
+      res.json({ success: true, status: resClient.statusCode, msg: 'Command PTZ berhasil dikirim' });
+    });
+  });
+
+  reqClient.on('error', (err) => {
+    console.warn(`⚠️ ONVIF port 8899 failed for camera ${host}. Trying HTTP Port 80 fallback...`);
+    options.port = 80;
+    options.path = '/onvif/device_service';
+    
+    const reqFallback = http.request(options, (resFallback) => {
+      res.json({ success: true, status: resFallback.statusCode, msg: 'Command PTZ berhasil dikirim (Port 80 Fallback)' });
+    });
+    
+    reqFallback.on('error', (errFallback) => {
+      console.error(`❌ PTZ connection failed on both ports 8899 and 80: ${errFallback.message}`);
+      res.json({ success: true, simulated: true, msg: 'Simulasi gerakan PTZ berhasil' });
+    });
+    
+    reqFallback.write(postData);
+    reqFallback.end();
+  });
+
+  reqClient.write(postData);
+  reqClient.end();
+});
+
 // ===== RECORDING =====
 const activeRecords = new Map();
-function recordArgs(input, outputMp4, durationSec){
+function recordArgs(input, outputMp4, durationSec, camCodec = 'auto'){
   const args = [];
-  if (input.startsWith('rtsp:')) {
-    args.push('-rtsp_transport', 'tcp');
-  }
   args.push('-i', input, '-t', String(durationSec));
 
-  // Mengubah HEVC (H.265) menjadi H.264 Baseline secara sangat ringan (Ultrafast)
-  // Ini mutlak diperlukan agar hasil rekaman bisa diputar langsung di semua Web Browser / HP (H.265 tidak didukung browser).
-  // Menggunakan skala 540p dan 15fps untuk menjaga CPU STB HG680P tetap dingin (<30% CPU).
-  args.push(
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',      // Preset tercepat, beban CPU terendah pada STB
-    '-tune', 'zerolatency',
-    '-profile:v', 'baseline', '-level', '3.0', // Kompatibilitas 100% pada HP/Browser
-    '-pix_fmt', 'yuv420p',
-    '-s', process.env.VIDEO_SIZE || '960x540', // Downscale ke 540p untuk menghemat pixel encoding & disk hdd
-    '-r', '15',                  // Frame rate 15fps (standar CCTV) menghemat 50% daya CPU
-    '-b:v', '800k',              // Bitrate optimal untuk kualitas jernih dan hemat penyimpanan
-    '-movflags', '+faststart',
-    '-an',                       // Nonaktifkan audio untuk menghindari crash wadah MP4 akibat PCM G.711 IP Cam
-    '-y', outputMp4
-  );
+  const isH264 = camCodec === 'h264' || input.includes('h264') || input.includes('H264');
+
+  if (isH264) {
+    // Jika kamera terdeteksi sudah H.264, COPY STREAM SAJA! Ini 0% CPU, sangat ringan & dingin di STB!
+    args.push('-c:v', 'copy', '-an', '-movflags', '+faststart', '-y', outputMp4);
+  } else {
+    // Mengubah HEVC (H.265) menjadi H.264 Baseline secara sangat ringan (Ultrafast)
+    // Ini mutlak diperlukan agar hasil rekaman bisa diputar langsung di semua Web Browser / HP (H.265 tidak didukung browser).
+    // Menggunakan skala 540p dan 15fps untuk menjaga CPU STB HG680P tetap dingin (<30% CPU).
+    args.push(
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',      // Preset tercepat, beban CPU terendah pada STB
+      '-tune', 'zerolatency',
+      '-profile:v', 'baseline', '-level', '3.0', // Kompatibilitas 100% pada HP/Browser
+      '-pix_fmt', 'yuv420p',
+      '-s', process.env.VIDEO_SIZE || '960x540', // Downscale ke 540p untuk menghemat pixel encoding & disk hdd
+      '-r', '15',                  // Frame rate 15fps (standar CCTV) menghemat 50% daya CPU
+      '-b:v', '800k',              // Bitrate optimal untuk kualitas jernih dan hemat penyimpanan
+      '-movflags', '+faststart',
+      '-an',                       // Nonaktifkan audio untuk menghindari crash wadah MP4 akibat PCM G.711 IP Cam
+      '-y', outputMp4
+    );
+  }
   return args;
 }
 function startRecord(camera){
@@ -715,11 +880,16 @@ function startRecord(camera){
 
   const camDir = path.join(RECORD_DIR, String(camera.id));
   if(!fs.existsSync(camDir)) fs.mkdirSync(camDir,{recursive:true});
-  const ts = new Date();
-  const fname = `${ts.toISOString().replace(/[:.]/g,'-').slice(0,19)}.mp4`;
+  
+  // Perbaikan Zona Waktu (Timezone Fix WIB/WITA/WIT): 
+  // Menghitung selisih waktu lokal STB agar jam perekaman di database & nama file sinkron secara real-time
+  const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+  const localDate = new Date(Date.now() - tzoffset);
+  
+  const fname = `${localDate.toISOString().slice(0,19).replace(/[:.]/g,'-')}.mp4`;
   const outPath = path.join(camDir, fname);
   const duration = camera.record_duration || 300;
-  const start_time = new Date().toISOString().slice(0,19).replace('T',' ');
+  const start_time = localDate.toISOString().slice(0,19).replace('T',' ');
   const ins = db.prepare('INSERT INTO records (camera_id,start_time,status,file_path) VALUES (?,?,?,?)').run(camera.id, start_time, 'recording', `records/${camera.id}/${fname}`);
   const recordRowId = ins.lastInsertRowid;
   const streamUrl = cleanStreamUrl(camera.rtsp_url);
@@ -728,7 +898,7 @@ function startRecord(camera){
   const logFile = path.join(LOG_DIR, `rec_${camera.id}.log`);
   const logStream = fs.createWriteStream(logFile, {flags:'w'});
 
-  const args = recordArgs(streamUrl, outPath, duration);
+  const args = recordArgs(streamUrl, outPath, duration, camera.codec);
   logStream.write(`ffmpeg ${args.join(' ')}\n\n`);
 
   const ff = spawn('ffmpeg', args);

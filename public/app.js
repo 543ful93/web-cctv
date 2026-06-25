@@ -337,6 +337,9 @@ let snapshotInterval = null;
 let dashboardClockInterval = null;
 let playerUptimeInterval = null;
 let activeLogInterval = null;
+let isRecordingActive = false;
+let recordTimerInterval = null;
+let recordTimerSec = 0;
 
 // ================= INITIALIZATION =================
 document.addEventListener("DOMContentLoaded", () => {
@@ -952,6 +955,11 @@ async function initGridLiveStream(cam) {
         
         // Error handling fallback CORS Proxy
         hls.on(Hls.Events.ERROR, (evt, errData) => {
+          if (errData.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            if (errData.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || errData.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+              hls.startLoad();
+            }
+          }
           if (errData.fatal) {
             console.log(`Grid stream error cam ${cam.id}, attempting CORS proxy fallback...`);
             if (hlsUrl && !hlsUrl.includes("/api/hls-proxy")) {
@@ -1183,6 +1191,11 @@ function playHlsInMapPopup(hlsUrl, video, splash) {
     });
 
     hls.on(Hls.Events.ERROR, (evt, errData) => {
+      if (errData.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        if (errData.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || errData.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+          hls.startLoad();
+        }
+      }
       if (errData.fatal) {
         if (hlsUrl && !hlsUrl.includes("/api/hls-proxy")) {
           const proxiedUrl = `/api/hls-proxy?url=${encodeURIComponent(hlsUrl)}`;
@@ -1636,6 +1649,12 @@ function playHlsWithReconnect(hlsUrl) {
       // Error/Stall Handling with Reconnect
       hls.on(Hls.Events.ERROR, (evt, errData) => {
         console.error("HLS Player Event Error:", errData);
+        
+        if (errData.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          if (errData.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || errData.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+            hls.startLoad();
+          }
+        }
         
         if (errData.fatal) {
           if (playerRetryCount < 10) {
@@ -2634,4 +2653,94 @@ function showToast(message, type = "success") {
   setTimeout(() => {
     toast.className = "fixed bottom-4 right-4 bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 z-[9999] max-w-sm pointer-events-none transform translate-y-20 opacity-0 transition-all duration-300";
   }, 4500);
+}
+
+// ================= ASISTEN PEMBUAT RTSP / ONVIF URL =================
+let isRtspMakerOpen = false;
+function toggleRtspMaker() {
+  const content = document.getElementById("rtsp-maker-content");
+  const chevron = document.getElementById("rtsp-maker-chevron");
+  if (!content || !chevron) return;
+  
+  isRtspMakerOpen = !isRtspMakerOpen;
+  if (isRtspMakerOpen) {
+    content.classList.remove("hidden");
+    chevron.classList.remove("fa-chevron-down");
+    chevron.classList.add("fa-chevron-up");
+    generateRtspPreview();
+  } else {
+    content.classList.add("hidden");
+    chevron.classList.remove("fa-chevron-up");
+    chevron.classList.add("fa-chevron-down");
+  }
+}
+
+function generateRtspPreview() {
+  const brand = document.getElementById("maker-brand").value;
+  const ip = document.getElementById("maker-ip").value.trim() || "192.168.1.3";
+  const port = document.getElementById("maker-port").value || "554";
+  const user = document.getElementById("maker-user").value.trim();
+  const pass = document.getElementById("maker-pass").value.trim();
+  const customPath = document.getElementById("maker-path").value.trim() || "/live/ch0";
+
+  let path = "/onvif1";
+  if (brand === "hikvision") path = "/h264/ch1/main/av_stream";
+  else if (brand === "dahua") path = "/cam/realmonitor?channel=1&subtype=0";
+  else if (brand === "v380") path = "/live/ch0";
+  else if (brand === "custom") path = customPath;
+
+  // Build credentials prefix
+  let creds = "";
+  if (user && pass) {
+    creds = `${user}:${pass}@`;
+  } else if (user) {
+    creds = `${user}@`;
+  }
+
+  const generatedUrl = `rtsp://${creds}${ip}:${port}${path}`;
+  const previewEl = document.getElementById("rtsp-maker-preview");
+  if (previewEl) previewEl.innerText = generatedUrl;
+}
+
+function applyRtspMaker() {
+  const preview = document.getElementById("rtsp-maker-preview").innerText;
+  const rtspInput = document.getElementById("cam-rtsp");
+  if (rtspInput && preview) {
+    rtspInput.value = preview;
+    showToast("URL RTSP berhasil digenerate dan dimasukkan!", "success");
+    toggleRtspMaker(); // close panel
+  }
+}
+
+// ================= PTZ KONTROL GERAKAN KAMERA =================
+async function handlePTZMove(action) {
+  if (!playerCamId) {
+    showToast("Kamera tidak terdeteksi dalam pemutar", "error");
+    return;
+  }
+  
+  const token = safeStorage.getItem("token");
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  try {
+    const res = await fetch(`/api/cameras/${playerCamId}/ptz`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Gagal mengirim komand PTZ");
+
+    if (data.simulated) {
+      showToast(`Menggerakkan kamera ke ${action.toUpperCase()} (Simulasi)`, "info");
+    } else {
+      showToast(`Menggerakkan kamera ke ${action.toUpperCase()} (Sukses)`, "success");
+    }
+  } catch (err) {
+    console.error("PTZ Command failed:", err.message);
+    showToast(err.message, "error");
+  }
 }

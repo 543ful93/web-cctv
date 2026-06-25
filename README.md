@@ -68,7 +68,7 @@ Sistem mendukung penjenamaan logo kustom Anda secara dinamis. Anda hanya perlu m
 
 ---
 
-## 📥 2. Petunjuk Instalasi Lengkap (Mulai Dari Awal)
+## 📥 1. Petunjuk Instalasi Lengkap (Mulai Dari Awal)
 
 ### Langkah 1: Penempatan Folder Proyek
 Ekstrak atau tempatkan file proyek Web-CCTV v2.7 ini di direktori aktif STB Anda. Folder standar yang direkomendasikan adalah `/root/web-cctv` atau `/opt/webcctv`.
@@ -121,7 +121,7 @@ Aplikasi Web-CCTV kini dapat diakses secara lokal di: **`http://<IP_STB_ANDA>:30
 
 ---
 
-## 💾 3. Kustomisasi Penyimpanan & Proteksi Hardisk 500GB
+## 💾 2. Kustomisasi Penyimpanan & Proteksi Hardisk 500GB
 
 Sangat dilarang menyimpan hasil rekaman video terus-menerus ke dalam **SD Card (MicroSD)** STB karena proses tulis-baca (*write endurance*) yang tinggi akan merusak SD Card Anda dalam hitungan bulan. Gunakan USB Harddisk Eksternal berkapasitas 500GB!
 
@@ -146,15 +146,43 @@ Untuk melindungi SD Card dari kepenuhan file video akibat unmount mendadak, kami
    - Server secara otomatis mengeksekusi shell asinkron **`mount -a`** untuk mencoba mengaitkan kembali hardisk Anda.
    - Jika upaya mount ulang gagal (kabel USB lepas atau mati daya), **server akan secara paksa membatalkan proses perekaman** dan memunculkan error di log database. SD Card Anda **100% aman dan bebas dari bahaya kepenuhan data rekaman**!
 
+### C. Sinkronisasi Jam & Waktu Lokal STB (Timezone Fix)
+STB HG680P/B860H tidak memiliki baterai CMOS internal (*Hardware RTC*), sehingga jam STB akan reset setiap kali STB dimatikan atau mati lampu. 
+Sistem v2.7 secara otomatis menghitung selisih waktu lokal STB saat membuat nama file dan menyimpan log database (WIB/WITA/WIT). Namun, Anda **wajib** menyelaraskan zona waktu Armbian Anda dengan server waktu atom (NTP) agar jam STB selalu akurat secara real-time:
+
+1. **Atur Zona Waktu Lokal (Contoh: Asia/Jakarta untuk WIB)**:
+   ```bash
+   sudo timedatectl set-timezone Asia/Jakarta
+   ```
+2. **Aktifkan Sinkronisasi Waktu Otomatis (NTP)**:
+   ```bash
+   sudo timedatectl set-ntp true
+   ```
+3. **Mulai Ulang Layanan Waktu**:
+   ```bash
+   sudo systemctl restart systemd-timesyncd
+   ```
+*Begitu STB terhubung ke internet (via Wi-Fi atau LAN), jam STB otomatis sinkron dengan detik yang tepat, dan nama berkas video rekaman Anda akan 100% cocok dengan jam dinding rumah Anda secara real-time!*
+
+---
+
+## 🎮 3. Asisten Pembuat RTSP & Kontrol Gerak PTZ (ONVIF)
+
+Sistem Web-CCTV v2.7 kini dilengkapi dengan fitur canggih untuk mempermudah pendaftaran kamera dan mengontrol pergerakan kamera PTZ:
+
+### A. Asisten Pembuat RTSP / ONVIF URL
+Banyak pengguna kesulitan mengetahui format URL RTSP kamera mereka. Kami menyematkan **RTSP URL Builder** di dalam modal tambah/edit kamera:
+* Menyediakan format template RTSP siap pakai untuk berbagai merk CCTV terkenal: **ONVIF Standar, Hikvision, Dahua, dan V380 / XM / IPCam**.
+* Pengguna cukup memasukkan IP Address, Port, Username, dan Password, lalu mengklik **"Gunakan URL"** untuk secara otomatis menyusun dan mengisi kolom RTSP secara instan!
+
+### B. Kontrol Gerak PTZ (Pan-Tilt-Zoom) & ONVIF
+Untuk kamera yang mendukung fitur berputar dan memperbesar (PTZ), kami menyematkan **Panel Joystick PTZ** melayang langsung di sidebar pemutar video modal:
+* **Tombol Kontrol**: Mendukung gerakan **Atas, Bawah, Kiri, Kanan, Berhenti (Stop)**, serta tombol **Zoom In** dan **Zoom Out**.
+* **Protokol Standar ONVIF**: Backend `server.js` akan secara otomatis mengekstraksi alamat IP dan kredensial dari URL RTSP, lalu mengirimkan perintah gerakan standar **ONVIF ContinuousMove SOAP** langsung ke port ONVIF kamera (port standard `8899` atau fallback `80`) tanpa memerlukan library eksternal yang berat!
+
 ---
 
 ## 🔐 4. Pembagian Izin Hak Akses Kamera (RBAC)
-
-Sistem Web-CCTV v2.7 memisahkan hak akses pemantauan kamera secara ketat berdasarkan peran akun pengguna (*Role*):
-
-1. **Administrator (`role: 'admin'`)**:
-   - Memiliki **Hak Akses Penuh (Full Access)**.
-   - Dapat melihat, memutar, dan memantau seluruh kamera yang terdaftar di database.
    - Berhak menentukan kamera mana yang boleh dipublikasikan pada tab **Kelola Kamera** dengan mengubah pilihan kolom **"Publik (Hanya Lihat)"** (`is_public = 1` atau `0`).
    - Berhak memproses rekaman manual, menjadwalkan perekaman otomatis, mengelola pengguna, dan mengubah pengaturan nama aplikasi/running text.
 
@@ -244,7 +272,32 @@ Untuk akses instan lewat ponsel Android, kami menyediakan proyek kode sumber len
 * **Luar Jangkauan (Cloud)**: Jika ping gagal (Anda sedang di luar rumah), aplikasi otomatis beralih memuat alamat Cloudflare Tunnel HTTPS Anda (`https://cctv.domainanda.com`).
 * **Penyimpanan Persisten**: Alamat lokal & domain awan Anda disimpan di `SharedPreferences` sehingga Anda hanya perlu memasukkannya sekali saja pada saat instalasi pertama kali.
 
-### Cara Build APK di Android Studio:
+### Cara Kompilasi APK Gratis & Otomatis (Tanpa Instal Aplikasi):
+
+Kami telah membuat konfigurasi **GitHub Actions CI/CD (`.github/workflows/android-build.yml`)** terintegrasi di dalam proyek ini. Anda **tidak perlu menginstal Android Studio** untuk membuat berkas APK!
+
+1. Upload/Push seluruh folder proyek ini ke akun GitHub Anda: `https://github.com/543ful93/web-cctv`
+2. GitHub secara otomatis akan mendeteksi file workflow tersebut dan **mengompilasi berkas APK secara gratis di Cloud (Server GitHub)** dalam waktu 2 menit!
+3. **Cara Mendownload APK Anda**:
+   - Masuk ke tab **Actions** di halaman utama repositori GitHub Anda.
+   - Klik pada proses build terbaru yang sedang atau sudah berjalan (*"Build Android Hybrid APK"*).
+   - Scroll ke bagian paling bawah ke bagian **Artifacts** (Aset Hasil Build).
+   - Klik nama **WebCCTV-v2.7-Hybrid-App** untuk mendownload berkas `.zip` yang berisi file biner **`app-debug.apk`** siap instal!
+
+---
+
+### 🌐 Cara Alternatif Instan (Menggunakan Web Converter Gratis):
+
+Jika Anda menginginkan file APK yang langsung jadi dalam 10 detik tanpa proses kompilasi kode Kotlin:
+1. Buka situs pembuat APK web gratis: **[WebIntoApp.com](https://www.webintoapp.com)** atau **[Web2APK](https://www.web2apk.com)**.
+2. Masukkan alamat domain Cloudflare Tunnel Anda (contoh: `https://cctv.domainanda.com`).
+3. Berikan nama aplikasi: `"Web-CCTV"`.
+4. Klik **Generate APK** dan download berkas `.apk` Anda secara instan ke HP!
+   *(Catatan: Metode alternatif instan ini hanya memuat satu URL web saja secara statis dan tidak mendukung fitur Auto-Ping Jaringan Lokal Wi-Fi).*
+
+---
+
+### Cara Build Manual di Android Studio:
 1. Buka **Android Studio** di komputer Anda, lalu klik **Open an Existing Project** and arahkan ke folder `android-app/` di proyek ini.
 2. Pastikan file `build.gradle` sinkron dan dependensi AndroidX terunduh sempurna.
 3. Klik menu **Build** -> **Build Bundle(s) / APK(s)** -> **Build APK(s)**.
