@@ -1141,6 +1141,33 @@ app.get('/api/system/specs', authOptional, (req, res) => {
   });
 });
 
+// Fungsi Pembaca MAC Address Perangkat via Sistem ARP Cache Linux/Windows
+function getMacAddress(ip) {
+  if (process.platform === 'win32') {
+    try {
+      const { execSync } = require('child_process');
+      const stdout = execSync(`arp -a ${ip}`, { encoding: 'utf8', timeout: 1500 });
+      const match = stdout.match(/([0-9a-f]{2}[:-]){5}([0-9a-f]{2})/i);
+      return match ? match[0].toUpperCase() : "N/A";
+    } catch { return "N/A"; }
+  }
+  
+  try {
+    const fs = require('fs');
+    if (fs.existsSync('/proc/net/arp')) {
+      const arpData = fs.readFileSync('/proc/net/arp', 'utf8');
+      const lines = arpData.split('\n');
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].trim().split(/\s+/);
+        if (cols.length >= 4 && cols[0] === ip) {
+          return cols[3].toUpperCase();
+        }
+      }
+    }
+  } catch (err) {}
+  return "N/A";
+}
+
 app.get('/api/system/onvif-discover', authOptional, (req, res) => {
   const dgram = require('dgram');
   const client = dgram.createSocket('udp4');
@@ -1166,6 +1193,16 @@ app.get('/api/system/onvif-discover', authOptional, (req, res) => {
     const xaddrMatch = rawXml.match(/<[^:]*:XAddrs>([^<]+)<\/[^:]*:XAddrs>/i) || rawXml.match(/XAddrs="([^"]+)"/i);
     const manufacturerMatch = rawXml.match(/<[^:]*:Manufacturer>([^<]+)<\/[^:]*:Manufacturer>/i);
     const modelMatch = rawXml.match(/<[^:]*:Model>([^<]+)<\/[^:]*:Model>/i);
+    
+    // Ekstraksi Serial Number (SN / UUID) secara asinkron dari XML URN bawaan WS-Discovery
+    const uuidMatch = rawXml.match(/urn:uuid:([a-fA-F0-9-]+)/i) || rawXml.match(/Address>urn:uuid:([^<]+)</i);
+    const sn = uuidMatch ? uuidMatch[1].trim() : "N/A";
+    
+    // Deteksi jika perangkat merupakan Multi-Channel NVR/DVR berdasarkan tipe profil/skop XML
+    const isMultiChannel = rawXml.includes('/type/video_encoder') || 
+                           rawXml.toLowerCase().includes('dvr') || 
+                           rawXml.toLowerCase().includes('nvr') || 
+                           rawXml.toLowerCase().includes('hvr');
 
     if (xaddrMatch) {
       const xaddrs = xaddrMatch[1].trim().split(/\s+/);
@@ -1187,7 +1224,10 @@ app.get('/api/system/onvif-discover', authOptional, (req, res) => {
               ip,
               port,
               xaddr: addr,
-              manufacturer: `${manufacturer} (${model})`
+              mac: getMacAddress(ip), // Membaca fisik MAC Address via ARP cache
+              manufacturer: `${manufacturer} (${model})`,
+              sn: sn,
+              is_dvr: isMultiChannel ? 1 : 0 // Flag penanda DVR/NVR
             });
           }
         }

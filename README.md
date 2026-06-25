@@ -170,15 +170,23 @@ Sistem v2.7 secara otomatis menghitung selisih waktu lokal STB saat membuat nama
 
 Sistem Web-CCTV v2.7 kini dilengkapi dengan fitur canggih untuk mendeteksi kamera lokal secara otomatis, mempermudah pendaftaran kamera, dan mengontrol pergerakan kamera PTZ:
 
-### A. Pemindai Kamera ONVIF Otomatis (ONVIF Scan)
-Bagi Anda yang kesulitan mencari tahu berapa IP Address kamera CCTV Anda di jaringan rumah:
+### A. Pemindai Kamera ONVIF, Detektor Serial Number (SN), MAC Address & Scan QR Code DVR/NVR
+Bagi Anda yang kesulitan mencari tahu detail IP Address, MAC Address, atau Serial Number kamera CCTV/DVR Anda di jaringan rumah:
 * Kami menyematkan fitur **Pindai IP Kamera ONVIF** langsung di dalam asisten pembuat RTSP.
 * Ketika tombol ditekan, backend `server.js` akan memancarkan sinyal penjelajah **UDP Multicast WS-Discovery** ke jaringan lokal Anda tanpa memerlukan library eksternal yang berat.
-* Seluruh kamera IP yang mendukung protokol ONVIF standar akan merespon dan **terdaftar secara otomatis di layar beserta IP, Port, dan Nama Pabrikannya** hanya dalam waktu 2.5 detik! Anda cukup mengklik tombol **"Pilih"** untuk memasukkan IP Address tersebut secara otomatis.
+* Seluruh kamera IP/DVR yang mendukung protokol ONVIF standar akan merespon dan **terdaftar secara otomatis di layar beserta IP, Port, Nama Pabrikan, Serial Number (SN / UUID), dan MAC Address fisik perangkat** secara real-time!
+* **Membaca MAC Address via ARP Cache**: Backend mendeteksi fisik MAC Address perangkat secara instan dengan membaca tabel ARP Linux (`/proc/net/arp`) secara native dan super cepat tanpa overhead.
+* **Auto-Detect Multi-Channel NVR/DVR**: Sistem menganalisis profil kemasan skop XML dari perangkat yang terdeteksi. Jika perangkat tersebut merupakan **DVR/NVR multi-channel**, sistem akan menandainya dengan badge **`[📼 DVR/NVR]`** di layar. Saat diklik "Pilih", sistem akan otomatis merubah jenis kamera ke **NVR** dan mengarahkan pengguna untuk melengkapi nomor channel kamera!
+* **Deteksi SN Tanpa Password**: Kami menyediakan template khusus **"XM / Xiongmai DVR (Deteksi SN Tanpa Pass)"** pada asisten pembuat RTSP. Ini sangat bermanfaat karena banyak DVR lokal (seperti Xiongmai/XM) menggunakan jabat tangan berbasis Serial Number dengan password kosong bawaan (`admin:` tanpa pass) untuk akses cepat yang super ringan.
+* **Scan QR Code DVR/NVR Terintegrasi (Instant Camera/Channel Detection)**:
+  Terdapat tombol **"Scan QR Code"** berbasis HTML5-QRCode yang menggunakan kamera ponsel/webcam Anda:
+  - Cukup arahkan kamera HP ke kode QR yang ada di casing atau layar TV DVR/NVR Anda (yang memuat Serial Number / SN).
+  - Sistem akan membaca Serial Number tersebut, menghentikan kamera, dan secara asinkron memicu pemindaian lokal di jaringan untuk mencocokkan SN tersebut.
+  - Begitu terdeteksi, ia akan **menemukan alamat IP lokal DVR Anda, mengidentifikasi port-nya, membedah jumlah saluran, dan otomatis memasukkan IP tersebut ke asisten pembangun RTSP** dengan format sandi transparan/kosong sekali klik! Ini adalah solusi terbaik bagi pengguna awam!
 
 ### B. Asisten Pembuat RTSP / ONVIF URL
 Banyak pengguna kesulitan mengetahui format URL RTSP kamera mereka. Kami menyematkan **RTSP URL Builder** di dalam modal tambah/edit kamera:
-* Menyediakan format template RTSP siap pakai untuk berbagai merk CCTV terkenal: **ONVIF Standar, Hikvision, Dahua, dan V380 / XM / IPCam**.
+* Menyediakan format template RTSP siap pakai untuk berbagai merk CCTV terkenal: **ONVIF Standar, XM / Xiongmai DVR (No Pass), Hikvision, Dahua, dan V380 / XM / IPCam**.
 * Pengguna cukup memasukkan IP Address, Port, Username, dan Password, lalu mengklik **"Gunakan URL"** untuk secara otomatis menyusun dan mengisi kolom RTSP secara instan!
 
 ### C. Kontrol Gerak PTZ (Pan-Tilt-Zoom) & ONVIF
