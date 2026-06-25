@@ -2744,3 +2744,75 @@ async function handlePTZMove(action) {
     showToast(err.message, "error");
   }
 }
+
+// ================= PINDAI JARINGAN LOKAL UNTUK KAMERA ONVIF =================
+async function handleScanOnvif() {
+  const listContainer = document.getElementById("rtsp-maker-list");
+  const resultsPanel = document.getElementById("rtsp-maker-results");
+  const countBadge = document.getElementById("rtsp-maker-scan-count");
+  if (!listContainer || !resultsPanel) return;
+
+  resultsPanel.classList.remove("hidden");
+  countBadge.innerText = "...";
+  listContainer.innerHTML = `
+    <div class="p-3 text-center text-xs text-slate-500 flex items-center justify-center space-x-2">
+      <i class="fa-solid fa-satellite-dish text-blue-500 animate-spin text-sm"></i>
+      <span>Sedang memindai IP Kamera ONVIF di jaringan lokal (2.5 detik)...</span>
+    </div>
+  `;
+
+  const token = safeStorage.getItem("token");
+  const headers = { "Authorization": `Bearer ${token}` };
+
+  try {
+    const res = await fetch("/api/system/onvif-discover", { headers });
+    const discovered = await res.json();
+
+    if (!Array.isArray(discovered) || discovered.length === 0) {
+      countBadge.innerText = "0";
+      listContainer.innerHTML = `
+        <div class="p-3 text-center text-xs text-slate-500 leading-normal">
+          <i class="fa-solid fa-magnifying-glass text-slate-600 block mb-1 text-sm"></i>
+          <span>Kamera ONVIF tidak ditemukan. Pastikan kamera menyala dan satu jaringan Wi-Fi/LAN dengan STB!</span>
+        </div>
+      `;
+      return;
+    }
+
+    countBadge.innerText = `${discovered.length} Ditemukan`;
+    listContainer.innerHTML = "";
+
+    discovered.forEach(cam => {
+      const row = document.createElement("div");
+      row.className = "flex items-center justify-between py-2 text-xs hover:bg-slate-900/60 transition px-1";
+      row.innerHTML = `
+        <div class="overflow-hidden">
+          <span class="block text-slate-200 font-bold font-mono text-[10px] md:text-xs">${cam.ip}</span>
+          <span class="block text-[9px] text-slate-500 font-medium leading-none mt-0.5">Port ONVIF: ${cam.port} • ${cam.manufacturer}</span>
+        </div>
+        <button type="button" onclick="selectDiscoveredOnvifCamera('${cam.ip}', '${cam.port}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold px-2 py-1 rounded transition border-0 cursor-pointer">
+          Pilih
+        </button>
+      `;
+      listContainer.appendChild(row);
+    });
+
+  } catch (err) {
+    console.error("ONVIF Discovery failed:", err.message);
+    countBadge.innerText = "Error";
+    listContainer.innerHTML = `
+      <div class="p-3 text-center text-xs text-red-400">Gagal memindai: ${err.message}</div>
+    `;
+  }
+}
+
+function selectDiscoveredOnvifCamera(ip, port) {
+  const ipInput = document.getElementById("maker-ip");
+  const portInput = document.getElementById("maker-port");
+  if (ipInput) ipInput.value = ip;
+  if (portInput) portInput.value = "554"; // Set standard RTSP port
+  
+  // Update preview URL immediately
+  generateRtspPreview();
+  showToast(`Kamera ${ip} berhasil dipilih! Silakan sesuaikan Merek dan Kredensial.`, "success");
+}

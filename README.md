@@ -166,16 +166,22 @@ Sistem v2.7 secara otomatis menghitung selisih waktu lokal STB saat membuat nama
 
 ---
 
-## 🎮 3. Asisten Pembuat RTSP & Kontrol Gerak PTZ (ONVIF)
+## 🎮 3. Asisten Pembuat RTSP, Pemindai ONVIF & Kontrol Gerak PTZ
 
-Sistem Web-CCTV v2.7 kini dilengkapi dengan fitur canggih untuk mempermudah pendaftaran kamera dan mengontrol pergerakan kamera PTZ:
+Sistem Web-CCTV v2.7 kini dilengkapi dengan fitur canggih untuk mendeteksi kamera lokal secara otomatis, mempermudah pendaftaran kamera, dan mengontrol pergerakan kamera PTZ:
 
-### A. Asisten Pembuat RTSP / ONVIF URL
+### A. Pemindai Kamera ONVIF Otomatis (ONVIF Scan)
+Bagi Anda yang kesulitan mencari tahu berapa IP Address kamera CCTV Anda di jaringan rumah:
+* Kami menyematkan fitur **Pindai IP Kamera ONVIF** langsung di dalam asisten pembuat RTSP.
+* Ketika tombol ditekan, backend `server.js` akan memancarkan sinyal penjelajah **UDP Multicast WS-Discovery** ke jaringan lokal Anda tanpa memerlukan library eksternal yang berat.
+* Seluruh kamera IP yang mendukung protokol ONVIF standar akan merespon dan **terdaftar secara otomatis di layar beserta IP, Port, dan Nama Pabrikannya** hanya dalam waktu 2.5 detik! Anda cukup mengklik tombol **"Pilih"** untuk memasukkan IP Address tersebut secara otomatis.
+
+### B. Asisten Pembuat RTSP / ONVIF URL
 Banyak pengguna kesulitan mengetahui format URL RTSP kamera mereka. Kami menyematkan **RTSP URL Builder** di dalam modal tambah/edit kamera:
 * Menyediakan format template RTSP siap pakai untuk berbagai merk CCTV terkenal: **ONVIF Standar, Hikvision, Dahua, dan V380 / XM / IPCam**.
 * Pengguna cukup memasukkan IP Address, Port, Username, dan Password, lalu mengklik **"Gunakan URL"** untuk secara otomatis menyusun dan mengisi kolom RTSP secara instan!
 
-### B. Kontrol Gerak PTZ (Pan-Tilt-Zoom) & ONVIF
+### C. Kontrol Gerak PTZ (Pan-Tilt-Zoom) & ONVIF
 Untuk kamera yang mendukung fitur berputar dan memperbesar (PTZ), kami menyematkan **Panel Joystick PTZ** melayang langsung di sidebar pemutar video modal:
 * **Tombol Kontrol**: Mendukung gerakan **Atas, Bawah, Kiri, Kanan, Berhenti (Stop)**, serta tombol **Zoom In** dan **Zoom Out**.
 * **Protokol Standar ONVIF**: Backend `server.js` akan secara otomatis mengekstraksi alamat IP dan kredensial dari URL RTSP, lalu mengirimkan perintah gerakan standar **ONVIF ContinuousMove SOAP** langsung ke port ONVIF kamera (port standard `8899` atau fallback `80`) tanpa memerlukan library eksternal yang berat!

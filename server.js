@@ -1141,6 +1141,85 @@ app.get('/api/system/specs', authOptional, (req, res) => {
   });
 });
 
+app.get('/api/system/onvif-discover', authOptional, (req, res) => {
+  const dgram = require('dgram');
+  const client = dgram.createSocket('udp4');
+  const discovered = [];
+  
+  const messageId = `urn:uuid:${Math.random().toString(36).substring(2,15)}-${Math.random().toString(36).substring(2,15)}`;
+  const probe = `<?xml version="1.0" encoding="utf-8"?>
+<Envelope xmlns="http://www.w3.org/2003/05/soap-envelope" xmlns:dn="http://www.onvif.org/ver10/network/wsdl">
+  <Header>
+    <MessageID xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">${messageId}</MessageID>
+    <To xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">urn:schemas-xmlsoap-org:device:pub:2004:08</To>
+    <Action xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</Action>
+  </Header>
+  <Body>
+    <Probe xmlns="http://schemas.xmlsoap.org/ws/2005/04/discovery">
+      <Types>dn:NetworkVideoTransmitter</Types>
+    </Probe>
+  </Body>
+</Envelope>`;
+
+  client.on('message', (msg, rinfo) => {
+    const rawXml = msg.toString();
+    const xaddrMatch = rawXml.match(/<[^:]*:XAddrs>([^<]+)<\/[^:]*:XAddrs>/i) || rawXml.match(/XAddrs="([^"]+)"/i);
+    const manufacturerMatch = rawXml.match(/<[^:]*:Manufacturer>([^<]+)<\/[^:]*:Manufacturer>/i);
+    const modelMatch = rawXml.match(/<[^:]*:Model>([^<]+)<\/[^:]*:Model>/i);
+
+    if (xaddrMatch) {
+      const xaddrs = xaddrMatch[1].trim().split(/\s+/);
+      xaddrs.forEach(addr => {
+        if (addr.startsWith('http://') || addr.startsWith('https://')) {
+          if (!discovered.some(d => d.xaddr === addr)) {
+            let ip = rinfo.address;
+            let port = 80;
+            try {
+              const u = new URL(addr);
+              ip = u.hostname;
+              port = u.port || 80;
+            } catch {}
+            
+            const manufacturer = manufacturerMatch ? manufacturerMatch[1].trim() : "ONVIF Camera";
+            const model = modelMatch ? modelMatch[1].trim() : "IPCam";
+            
+            discovered.push({
+              ip,
+              port,
+              xaddr: addr,
+              manufacturer: `${manufacturer} (${model})`
+            });
+          }
+        }
+      });
+    }
+  });
+
+  client.on('error', (err) => {
+    console.error("ONVIF Discovery Error:", err.message);
+  });
+
+  client.bind(0, () => {
+    try {
+      client.setBroadcast(true);
+      client.setMulticastTTL(2);
+      const buf = Buffer.from(probe);
+      client.send(buf, 0, buf.length, 3702, '239.255.255.250', (err) => {
+        if (err) {
+          console.error("Failed to send ONVIF probe:", err.message);
+        }
+      });
+    } catch (e) {
+      console.error("ONVIF Multicast binding error:", e.message);
+    }
+  });
+
+  setTimeout(() => {
+    try { client.close(); } catch {}
+    res.json(discovered);
+  }, 2500);
+});
+
 // automatic circular recording cleanup
 async function autoCleanupDisk() {
   try {
