@@ -827,8 +827,11 @@ app.post('/api/cameras/:id/ptz', authOptional, async (req, res) => {
 
 // ===== RECORDING =====
 const activeRecords = new Map();
-function recordArgs(input, outputMp4, durationSec, camCodec = 'auto'){
+function recordArgs(input, outputMp4, durationSec, camCodec = 'auto', useTcp = true){
   const args = [];
+  if (useTcp) {
+    args.push('-rtsp_transport', 'tcp');
+  }
   args.push('-i', input, '-t', String(durationSec));
 
   const isH264 = camCodec === 'h264' || input.includes('h264') || input.includes('H264');
@@ -898,7 +901,11 @@ function startRecord(camera){
   const logFile = path.join(LOG_DIR, `rec_${camera.id}.log`);
   const logStream = fs.createWriteStream(logFile, {flags:'w'});
 
-  const args = recordArgs(streamUrl, outPath, duration, camera.codec);
+  // Deteksi cerdas: Gunakan TCP jika kamera terdeteksi online via jabat tangan port 554
+  const statusObj = camStatus.get(camera.id) || { online: true, msg: 'tcp' };
+  const useTcp = (statusObj.msg && statusObj.msg.includes('tcp')) || statusObj.online === true;
+
+  const args = recordArgs(streamUrl, outPath, duration, camera.codec, useTcp);
   logStream.write(`ffmpeg ${args.join(' ')}\n\n`);
 
   const ff = spawn('ffmpeg', args);
@@ -913,19 +920,38 @@ function startRecord(camera){
     logStream.write(`\n❌ SPAWN ERROR: ${err.message}\n`);
     logStream.end();
     activeRecords.delete(String(camera.id));
+    
+    // Perbaikan Jam Lokal STB untuk waktu gagal
+    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+    const end_time = new Date(Date.now() - tzoffset).toISOString().slice(0,19).replace('T',' ');
+    
     db.prepare("UPDATE records SET status='failed', end_time=? WHERE id=?")
-      .run(new Date().toISOString().slice(0,19).replace('T',' '), recordRowId);
+      .run(end_time, recordRowId);
   });
 
   ff.on('close', code=>{
     logStream.end(`\nexit ${code}\n`);
     activeRecords.delete(String(camera.id));
-    const end_time = new Date().toISOString().slice(0,19).replace('T',' ');
+    
+    // Perbaikan Penghitungan Jam Lokal STB (Timezone Fix WIB/WITA/WIT)
+    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+    const end_time = new Date(Date.now() - tzoffset).toISOString().slice(0,19).replace('T',' ');
+    
     let size_mb = 0;
-    try{ size_mb = +(fs.statSync(outPath).size /1024/1024).toFixed(2); }catch{}
+    try {
+      if (fs.existsSync(outPath)) {
+        size_mb = +(fs.statSync(outPath).size / 1024 / 1024).toFixed(2);
+      }
+    } catch(e) {}
+    
+    // PERBAIKAN EMAS: Jika ukuran file > 0.05 MB, tandai sebagai 'completed' (Sukses)
+    // Hal ini karena penghentian manual (SIGINT) mengembalikan exit code 130 atau null, namun berkas MP4-nya sebenarnya sukses & utuh!
+    const finalStatus = (code === 0 || size_mb > 0.05) ? 'completed' : 'failed';
+    
     db.prepare('UPDATE records SET end_time=?, size_mb=?, duration_sec=?, status=? WHERE id=?')
-      .run(end_time, size_mb, duration, code===0 ? 'completed':'failed', recordRowId);
-    console.log(`■ record cam ${camera.id} done ${code} ${size_mb}MB`);
+      .run(end_time, size_mb, duration, finalStatus, recordRowId);
+      
+    console.log(`■ record cam ${camera.id} done ${code} ${size_mb}MB -> Status: ${finalStatus}`);
     autoCleanupDisk(); // Run automatic circular cleanup!
   });
   return {success:true, file:`/records/${camera.id}/${fname}`, record_id: recordRowId};

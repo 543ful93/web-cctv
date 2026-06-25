@@ -1017,9 +1017,9 @@ async function initLeafletMap() {
     // 3. Render the sidebar list of cameras right next to map
     renderMapCamerasList();
 
-    // Find center of coordinates or fallback to default Jakarta
-    let centerLat = -6.2088;
-    let centerLng = 106.8456;
+    // Find center of coordinates or fallback to default Serang (Indonesia)
+    let centerLat = -6.0807629;
+    let centerLng = 106.1683088;
     const camsWithCoords = camerasList.filter(c => c.lat !== null && c.lng !== null && !isNaN(c.lat) && !isNaN(c.lng));
     
     if (camsWithCoords.length > 0) {
@@ -1028,12 +1028,37 @@ async function initLeafletMap() {
     }
 
     // Initialize Map
-    mapInstance = L.map('map').setView([centerLat, centerLng], 12);
+    mapInstance = L.map('map').setView([centerLat, centerLng], 13);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+      attribution: '&copy; <a href="https://wa.me/6289531640440/copyright" target="_blank">Map CCTV</a> epul',
       maxZoom: 19
     }).addTo(mapInstance);
+
+    // Tambahkan Penanda Utama Posko CCTV - Bendera Indonesia (Pulsing Glow)
+    const flagIcon = L.divIcon({
+      className: 'indonesia-flag-marker',
+      html: `
+        <div class="relative flex items-center justify-center">
+          <span class="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-red-500/20 opacity-75"></span>
+          <div class="bg-gradient-to-tr from-slate-900 to-slate-800 border border-slate-700 w-8 h-8 rounded-full flex items-center justify-center shadow-2xl relative z-10 text-xs">
+            🇮🇩
+          </div>
+        </div>
+      `,
+      iconSize: [30, 30],
+      iconAnchor: [15, 15]
+    });
+
+    L.marker([-6.0807629, 106.1683088], { icon: flagIcon }).addTo(mapInstance)
+      .bindPopup(`<div class="text-center space-y-1 p-0.5">
+                    <div class="font-bold text-xs text-slate-100 flex items-center justify-center space-x-1">
+                      <span>🇮🇩</span>
+                      <span>Pusat CCTV (Admin)</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1"><i class="fa-solid fa-location-dot text-red-500 mr-1"></i>Serang, Banten, Indonesia</p>
+                  </div>`)
+      .openPopup();
 
     // Call invalidateSize after short delay once container is fully visible to avoid broken map layouts!
     setTimeout(() => {
@@ -2682,16 +2707,26 @@ function generateRtspPreview() {
   const user = document.getElementById("maker-user").value.trim();
   const pass = document.getElementById("maker-pass").value.trim();
   const customPath = document.getElementById("maker-path").value.trim() || "/live/ch0";
+  
+  const sn = document.getElementById("maker-sn") ? document.getElementById("maker-sn").value.trim() : "";
+  const mac = document.getElementById("maker-mac") ? document.getElementById("maker-mac").value.trim() : "";
 
   let path = "/onvif1";
   if (brand === "hikvision") path = "/h264/ch1/main/av_stream";
   else if (brand === "dahua") path = "/cam/realmonitor?channel=1&subtype=0";
   else if (brand === "v380") path = "/live/ch0";
+  else if (brand === "xmdvr") path = "/user=admin&password=&channel=1&stream=0.sdp";
   else if (brand === "custom") path = customPath;
+
+  // Substitusi placeholder SN / MAC secara dinamis jika diketik manual
+  path = path.replace(/\$\{sn\}/g, sn).replace(/\{sn\}/g, sn);
+  path = path.replace(/\$\{mac\}/g, mac).replace(/\{mac\}/g, mac);
 
   // Build credentials prefix
   let creds = "";
-  if (user && pass) {
+  if (brand === "xmdvr") {
+    creds = "admin:@"; // Sandi kosong khas DVR Xiongmai
+  } else if (user && pass) {
     creds = `${user}:${pass}@`;
   } else if (user) {
     creds = `${user}@`;
@@ -2784,13 +2819,24 @@ async function handleScanOnvif() {
 
     discovered.forEach(cam => {
       const row = document.createElement("div");
-      row.className = "flex items-center justify-between py-2 text-xs hover:bg-slate-900/60 transition px-1";
+      row.className = "flex items-center justify-between py-2.5 text-xs hover:bg-slate-900/60 transition px-1 border-b border-slate-900/40";
+      
+      const dvrBadge = cam.is_dvr === 1 ? `<span class="bg-purple-500/15 text-purple-400 text-[8px] font-bold px-1.5 py-0.5 rounded border border-purple-500/20 uppercase tracking-wide">📼 DVR/NVR</span>` : "";
+      const macText = cam.mac && cam.mac !== "N/A" ? `<span class="text-slate-500 ml-1.5">MAC: ${cam.mac}</span>` : "";
+
       row.innerHTML = `
-        <div class="overflow-hidden">
-          <span class="block text-slate-200 font-bold font-mono text-[10px] md:text-xs">${cam.ip}</span>
-          <span class="block text-[9px] text-slate-500 font-medium leading-none mt-0.5">Port ONVIF: ${cam.port} • ${cam.manufacturer}</span>
+        <div class="overflow-hidden flex-1 mr-2 space-y-0.5">
+          <div class="flex items-center space-x-1.5 flex-wrap">
+            <span class="text-slate-200 font-bold font-mono text-[10px] md:text-xs">${cam.ip}</span>
+            ${dvrBadge}
+          </div>
+          <span class="block text-[9px] text-slate-400 font-semibold truncate">${cam.manufacturer}</span>
+          <div class="block text-[8px] text-slate-500 font-mono leading-none truncate flex items-center">
+            <span>SN: <span class="text-blue-400 font-bold">${cam.sn || 'N/A'}</span></span>
+            ${macText}
+          </div>
         </div>
-        <button type="button" onclick="selectDiscoveredOnvifCamera('${cam.ip}', '${cam.port}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold px-2 py-1 rounded transition border-0 cursor-pointer">
+        <button type="button" onclick="selectDiscoveredOnvifCamera('${cam.ip}', '${cam.port}', ${cam.is_dvr}, '${cam.sn||""}', '${cam.mac||""}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold px-2 py-1.5 rounded-lg transition border-0 cursor-pointer flex-shrink-0 shadow-sm">
           Pilih
         </button>
       `;
@@ -2806,13 +2852,125 @@ async function handleScanOnvif() {
   }
 }
 
-function selectDiscoveredOnvifCamera(ip, port) {
+function selectDiscoveredOnvifCamera(ip, port, isDvr, sn = "", mac = "") {
   const ipInput = document.getElementById("maker-ip");
   const portInput = document.getElementById("maker-port");
+  const camType = document.getElementById("cam-type");
+  const snInput = document.getElementById("maker-sn");
+  const macInput = document.getElementById("maker-mac");
+  
   if (ipInput) ipInput.value = ip;
   if (portInput) portInput.value = "554"; // Set standard RTSP port
+  if (snInput && sn && sn !== 'N/A') snInput.value = sn;
+  if (macInput && mac && mac !== 'N/A') macInput.value = mac;
   
-  // Update preview URL immediately
+  if (isDvr === 1 && camType) {
+    camType.value = "nvr";
+    showToast(`DVR/NVR ${ip} terdeteksi! Tipe diubah ke NVR. Silakan tentukan nomor Channel.`, "info");
+  } else if (camType) {
+    camType.value = "ipcam";
+  }
+  
   generateRtspPreview();
   showToast(`Kamera ${ip} berhasil dipilih! Silakan sesuaikan Merek dan Kredensial.`, "success");
+}
+
+// ================= KONTROL QR CODE SCANNER (DVR / NVR DETEKTOR) =================
+let html5QrReader = null;
+
+function startQrCodeScanner() {
+  const container = document.getElementById("qr-scanner-container");
+  const status = document.getElementById("qr-status");
+  if (!container || !status) return;
+
+  container.classList.remove("hidden");
+  status.innerText = "Membuka kamera ponsel / webcam...";
+
+  if (html5QrReader) {
+    try { html5QrReader.clear(); } catch(e){}
+    html5QrReader = null;
+  }
+
+  html5QrReader = new Html5Qrcode("qr-reader");
+  
+  html5QrReader.start(
+    { facingMode: "environment" }, // Prioritaskan kamera belakang HP
+    {
+      fps: 10,
+      qrbox: { width: 220, height: 220 }
+    },
+    async (decodedText, decodedResult) => {
+      console.log(`📸 QR Code Terbaca: ${decodedText}`);
+      status.innerText = `Sukses! Menemukan SN: ${decodedText}`;
+      showToast(`QR Code Sukses! Menemukan Serial Number: ${decodedText}`, "success");
+      
+      stopQrCodeScanner(); // Stop kamera HP
+      
+      const makerBrand = document.getElementById("maker-brand");
+      if (makerBrand) {
+        makerBrand.value = "xmdvr"; // Set template ke XM DVR No Pass
+      }
+      
+      showToast("Mencocokkan Serial Number hasil scan di jaringan lokal Anda...", "info");
+      
+      const listContainer = document.getElementById("rtsp-maker-list");
+      const resultsPanel = document.getElementById("rtsp-maker-results");
+      const countBadge = document.getElementById("rtsp-maker-scan-count");
+      
+      if (resultsPanel) resultsPanel.classList.remove("hidden");
+      if (countBadge) countBadge.innerText = "...";
+      if (listContainer) {
+        listContainer.innerHTML = `
+          <div class="p-3 text-center text-xs text-slate-500 flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-satellite-dish text-blue-500 animate-spin text-sm"></i>
+            <span>Mencari perangkat dengan SN ${decodedText} di jaringan lokal...</span>
+          </div>
+        `;
+      }
+
+      const token = safeStorage.getItem("token");
+      const headers = { "Authorization": `Bearer ${token}` };
+
+      try {
+        const res = await fetch("/api/system/onvif-discover", { headers });
+        const discovered = await res.json();
+        
+        // Cari perangkat ONVIF yang UUID / SN nya cocok dengan hasil scan QR Code!
+        const matchedCam = discovered.find(c => c.sn.toLowerCase().includes(decodedText.toLowerCase()) || decodedText.toLowerCase().includes(c.sn.toLowerCase()));
+        
+        if (matchedCam) {
+          showToast(`DVR/NVR cocok ditemukan pada IP ${matchedCam.ip}!`, "success");
+          selectDiscoveredOnvifCamera(matchedCam.ip, matchedCam.port, matchedCam.is_dvr);
+        } else {
+          showToast("Serial Number terbaca. Tidak ditemukan di LAN, silakan isi IP secara manual.", "info");
+          const ipInput = document.getElementById("maker-ip");
+          if (ipInput) ipInput.value = "192.168.1.100"; // default template placeholder
+          generateRtspPreview();
+        }
+      } catch (err) {
+        console.error("Discovery error after QR scan:", err);
+      }
+    },
+    (errorMessage) => {
+      // Abaikan log error scanning realtime agar konsol bersih
+    }
+  ).catch(err => {
+    console.error("Camera start failed:", err);
+    status.innerText = "Gagal membuka kamera. Pastikan Anda mengizinkan akses kamera!";
+    showToast("Gagal membuka kamera: pastikan izin kamera diizinkan dan berjalan di protokol HTTPS!", "error");
+  });
+}
+
+function stopQrCodeScanner() {
+  const container = document.getElementById("qr-scanner-container");
+  if (container) container.classList.add("hidden");
+  
+  if (html5QrReader) {
+    html5QrReader.stop().then(() => {
+      console.log("📸 QR Scanner stopped.");
+    }).catch(err => {
+      console.warn("Error stopping QR Scanner:", err);
+    });
+    html5QrReader = null;
+  }
 }
