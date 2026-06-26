@@ -2974,3 +2974,117 @@ function stopQrCodeScanner() {
     html5QrReader = null;
   }
 }
+
+// ================= PEMELIHARAAN MANUAL: BERSIHKAN CACHE & RAM =================
+async function handleManualClearCache() {
+  showLoader("Sedang membersihkan cache & membebaskan RAM STB...");
+  
+  const token = safeStorage.getItem("token");
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  try {
+    const res = await fetch("/api/system/clear-cache", {
+      method: "POST",
+      headers
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Gagal menyapu cache");
+
+    showToast("Cache sistem disapu bersih, disk disinkronkan, & RAM STB kembali lega!", "success");
+    
+    // Refresh stats after brief delay
+    setTimeout(() => {
+      loadDashboardStats();
+    }, 1500);
+
+  } catch (err) {
+    console.error("Manual cache clean failed:", err.message);
+    showToast(err.message, "error");
+  } finally {
+    hideLoader();
+  }
+}
+
+// ================= ADMIN PEMELIHARAAN SYSTEMD =================
+async function handleAdminMountHdd() {
+  showLoader("Sedang memicu pengaitan ulang (mount -a) Hardisk...");
+  
+  const token = safeStorage.getItem("token");
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  try {
+    const res = await fetch("/api/admin/mount-hdd", {
+      method: "POST",
+      headers
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Gagal memicu mount hdd");
+
+    if (data.warning) {
+      showToast(data.msg, "error");
+    } else {
+      showToast(data.msg, "success");
+    }
+    
+    setTimeout(() => {
+      loadDashboardStats();
+    }, 1500);
+
+  } catch (err) {
+    console.error("Admin Mount HDD failed:", err.message);
+    showToast(err.message, "error");
+  } finally {
+    hideLoader();
+  }
+}
+
+async function handleAdminReboot() {
+  const confirmReboot = confirm("Apakah Anda 100% yakin ingin memulai ulang (REBOOT) sistem STB? Seluruh streaming dan proses perekaman yang sedang berjalan akan dihentikan sementara.");
+  if (!confirmReboot) return;
+
+  showLoader("Sedang memicu reboot STB... Silakan tunggu.");
+
+  const token = safeStorage.getItem("token");
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  try {
+    const res = await fetch("/api/admin/reboot", {
+      method: "POST",
+      headers
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Gagal memicu reboot");
+
+    showToast(data.msg, "success");
+
+    // Tampilkan hitung mundur reboot secara visual di layar agar user tahu kapan STB online kembali!
+    let countdown = 45; // 45 detik
+    const loaderMsg = document.getElementById("loader-msg");
+    
+    const interval = setInterval(() => {
+      countdown--;
+      if (loaderMsg) {
+        loaderMsg.innerText = `STB sedang Reboot. Menghubungkan kembali dalam ${countdown} detik...`;
+      }
+      if (countdown <= 0) {
+        clearInterval(interval);
+        if (loaderMsg) loaderMsg.innerText = "Mencoba memuat ulang halaman...";
+        window.location.reload();
+      }
+    }, 1000);
+
+  } catch (err) {
+    console.error("Admin Reboot failed:", err.message);
+    showToast(err.message, "error");
+    hideLoader();
+  }
+}

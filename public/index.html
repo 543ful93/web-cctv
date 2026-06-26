@@ -610,6 +610,53 @@
               <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition cursor-pointer border-0" data-i18n="save">Simpan Perubahan</button>
             </form>
           </div>
+
+          <!-- Cache and RAM Cleaner Panel -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 space-y-4 shadow-lg">
+            <h3 class="font-bold text-sm md:text-base border-b border-slate-800 pb-2 text-blue-400">Pembersihan Cache & RAM Sistem</h3>
+            <div class="space-y-3 max-w-lg">
+              <p class="text-xs text-slate-400 leading-relaxed">Pembersihan ini akan secara paksa mengosongkan berkas buffer HLS yang tidak aktif di disk STB, melakukan sinkronisasi disk (`sync`), dan memicu **`drop_caches`** untuk membebaskan RAM Armbian agar CPU tetap dingin dan performa video berputar super lancar.</p>
+              <button onclick="handleManualClearCache()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition border-0 cursor-pointer flex items-center space-x-1.5 shadow-md">
+                <i class="fa-solid fa-broom animate-pulse"></i>
+                <span>Bersihkan Cache & RAM Sekarang</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Admin Maintenance Panel -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 space-y-4 shadow-lg admin-only hidden">
+            <h3 class="font-bold text-sm md:text-base border-b border-slate-800 pb-2 text-red-400 flex items-center space-x-2">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              <span>Pemeliharaan STB & Hardisk (Khusus Admin)</span>
+            </h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <!-- Mount HDD Card -->
+              <div class="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
+                <h4 class="font-bold text-xs text-slate-200 flex items-center space-x-1.5">
+                  <i class="fa-solid fa-hard-drive text-blue-500"></i>
+                  <span>Kaitkan (Mount) Hardisk</span>
+                </h4>
+                <p class="text-[11px] text-slate-400 leading-relaxed">Gunakan fitur ini jika Hardisk 500GB tidak sengaja terlepas atau ingin dikaitkan kembali secara paksa ke dalam sistem tanpa perlu restart STB.</p>
+                <button onclick="handleAdminMountHdd()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition border-0 cursor-pointer flex items-center space-x-1.5 shadow-md">
+                  <i class="fa-solid fa-arrows-spin"></i>
+                  <span>Mount Ulang Hardisk</span>
+                </button>
+              </div>
+
+              <!-- Reboot STB Card -->
+              <div class="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
+                <h4 class="font-bold text-xs text-slate-200 flex items-center space-x-1.5">
+                  <i class="fa-solid fa-power-off text-red-500"></i>
+                  <span>Mulai Ulang (Reboot) STB</span>
+                </h4>
+                <p class="text-[11px] text-slate-400 leading-relaxed">Gunakan fitur ini untuk melakukan reboot sistem STB Armbian secara aman langsung dari Web UI jika STB terasa mulai lambat atau setelah ganti konfigurasi.</p>
+                <button onclick="handleAdminReboot()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition border-0 cursor-pointer flex items-center space-x-1.5 shadow-md">
+                  <i class="fa-solid fa-rotate animate-spin"></i>
+                  <span>Reboot STB Sekarang</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
 
       </div>

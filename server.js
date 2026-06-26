@@ -350,14 +350,21 @@ console.log('FFmpeg AAC encoder:', HAVE_AAC ? 'yes':'no');
 function ffmpegLiveArgs(input, outDir, camCodec = 'auto'){
   const enableAudio = (process.env.VIDEO_AUDIO === '1') && HAVE_AAC;
   const isH264 = camCodec === 'h264' || input.includes('h264') || input.includes('H264');
-  const args = [
-    '-i', input,
-    '-fflags','nobuffer',
-    '-flags','low_delay',
-  ];
+  const args = [];
 
+  // OPSI INPUT FFMPEG (Wajib diletakkan SEBELUM -i agar sintaks valid & tidak crash)
+  if (input.startsWith('rtsp:')) {
+    args.push('-rtsp_transport', 'tcp'); // Mengunci TCP untuk koneksi stabil pada port 5050 & 554
+  }
+  args.push('-fflags', 'nobuffer');
+  args.push('-flags', 'low_delay');
+
+  // INPUT STREAM URL
+  args.push('-i', input);
+
+  // OPSI OUTPUT FFMPEG (Diletakkan SETELAH -i)
   if (isH264) {
-    // Jika kamera terdeteksi sudah H.264, COPY STREAM SAJA! Ini 0% CPU, sangat dingin di STB!
+    // Jika kamera terdeteksi sudah H.264, COPY STREAM SAJA! Ini 0% CPU, sangat ringan & dingin di STB!
     args.push('-c:v', 'copy');
   } else {
     // Jika HEVC/H.265 atau kustom, transcode ke H.264 Baseline
@@ -1167,6 +1174,52 @@ app.get('/api/system/specs', authOptional, (req, res) => {
   });
 });
 
+app.post('/api/system/clear-cache', authOptional, (req, res) => {
+  try {
+    autoClearCaches();
+    res.json({ success: true, msg: 'Pembersihan cache & pembebasan RAM berhasil dipicu!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== ADMIN PEMELIHARAAN SYSTEMD (REBOOT & MOUNT HDD) =====
+app.post('/api/admin/reboot', auth('admin'), (req, res) => {
+  const { exec } = require('child_process');
+  console.warn("⚠️ PERINGATAN: Administrator memicu REBOOT sistem STB!");
+  
+  res.json({ success: true, msg: 'STB sedang memulai ulang (reboot)... Silakan tunggu sekitar 60 detik.' });
+  
+  // Berikan waktu delay 2 detik agar respon sukses sukses terkirim ke browser terlebih dahulu
+  setTimeout(() => {
+    exec("reboot", (err) => {
+      if (err) console.error("❌ Gagal memicu reboot:", err.message);
+    });
+  }, 2000);
+});
+
+app.post('/api/admin/mount-hdd', auth('admin'), (req, res) => {
+  const { exec } = require('child_process');
+  console.log("🛠️ Administrator memicu pengaitan ulang (Mount) Hardisk...");
+  
+  exec("mount -a", (err) => {
+    if (err) {
+      return res.status(500).json({ error: `Gagal menjalankan mount -a: ${err.message}` });
+    }
+    
+    // Verifikasi apakah hardisk berhasil ter-mount dengan mendeteksi berkas pengaman
+    const fs = require('fs');
+    const path = require('path');
+    const isMounted = fs.existsSync(path.join(RECORD_DIR, '.cctv_hdd_active'));
+    
+    if (isMounted) {
+      res.json({ success: true, msg: 'Hardisk 500GB Berhasil Terkait (Mounted)!' });
+    } else {
+      res.json({ success: false, warning: true, msg: 'Perintah mount berhasil dikirim, namun berkas pengaman .cctv_hdd_active belum terdeteksi. Silakan pastikan hardisk sudah tercolok ke port USB STB.' });
+    }
+  });
+});
+
 // Fungsi Pembaca MAC Address Perangkat via Sistem ARP Cache Linux/Windows
 function getMacAddress(ip) {
   if (process.platform === 'win32') {
@@ -1409,6 +1462,74 @@ app.get('*', (req,res)=>{
   if(req.path.startsWith('/api')) return res.status(404).json({error:'not found'});
   res.sendFile(path.join(__dirname,'public','index.html'));
 });
+
+// ===== AUTOMATIC CACHE & RAM CLEANER (Sangat Ringan & Dingin di STB) =====
+function autoClearCaches() {
+  const { exec } = require('child_process');
+  console.log("🧹 [Pembersihan Otomatis] Memulai penyapuan cache RAM & File HLS...");
+
+  // 1. Bersihkan Cache RAM Linux (Drop PageCache, Dentries, Inodes)
+  if (process.platform === 'linux') {
+    exec("sync && echo 3 > /proc/sys/vm/drop_caches", (err) => {
+      if (err) {
+        console.warn("⚠️ Gagal membersihkan cache RAM (Abaikan jika bukan root/sudo):", err.message);
+      } else {
+        console.log("✅ Pembersihan Cache RAM Linux (Drop Caches) Sukses! RAM kembali lega.");
+      }
+    });
+  }
+
+  // 2. Bersihkan Potongan Video HLS (.ts) Yatim Piatu di Folder Streams
+  try {
+    if (fs.existsSync(HLS_DIR)) {
+      const camDirs = fs.readdirSync(HLS_DIR);
+      camDirs.forEach(camDir => {
+        const camId = camDir;
+        const dirPath = path.join(HLS_DIR, camId);
+        
+        // Jika kamera ini sedang TIDAK memancarkan live stream aktif, bersihkan seluruh sisa segmen .ts di disk!
+        if (!activeStreams.has(String(camId))) {
+          try {
+            const files = fs.readdirSync(dirPath);
+            files.forEach(file => {
+              fs.unlinkSync(path.join(dirPath, file));
+            });
+            fs.rmdirSync(dirPath);
+            console.log(`🧹 Folder HLS tidak aktif dibersihkan: /streams/${camId}`);
+          } catch {}
+        } else {
+          // Jika kamera aktif, bersihkan segmen .ts lama yang usianya > 30 detik demi menjaga disk I/O
+          try {
+            const files = fs.readdirSync(dirPath);
+            const now = Date.now();
+            files.forEach(f => {
+              if (f.endsWith('.ts')) {
+                const fp = path.join(dirPath, f);
+                const st = fs.statSync(fp);
+                if (now - st.mtimeMs > 30000) { // lebih dari 30 detik
+                  fs.unlinkSync(fp);
+                }
+              }
+            });
+          } catch {}
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Gagal menyapu folder HLS:", err.message);
+  }
+}
+
+// Jalankan pembersihan cache RAM & HLS otomatis setiap 10 menit sekali!
+setInterval(autoClearCaches, 10 * 60 * 1000);
+
+// Pemicu Pembersihan CPU & RAM tambahan setiap 30 menit!
+setInterval(() => {
+  autoCleanupDisk();
+  // Jalankan ntpdate penyelarasan jam otomatis jika ntpdate terpasang
+  const { exec } = require('child_process');
+  exec("ntpdate id.pool.ntp.org", () => {});
+}, 30 * 60 * 1000);
 
 app.listen(PORT,'0.0.0.0', ()=>{
   console.log(`🚀 Web-CCTV v2.7 http://0.0.0.0:${PORT}`);
