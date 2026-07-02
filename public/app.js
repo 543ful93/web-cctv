@@ -344,6 +344,17 @@ let recordTimerSec = 0;
 // ================= INITIALIZATION =================
 document.addEventListener("DOMContentLoaded", () => {
   try {
+    // Inisialisasi Tema (Gelap/Terang) bawaan dari safeStorage
+    const storedTheme = safeStorage.getItem("theme") || "dark";
+    if (storedTheme === "light") {
+      document.body.classList.add("light-mode");
+      const icon = document.getElementById("theme-toggle-icon");
+      if (icon) {
+        icon.classList.remove("fa-sun", "text-amber-400");
+        icon.classList.add("fa-moon", "text-indigo-400");
+      }
+    }
+
     // Setup clock
     startDashboardClock();
     
@@ -372,12 +383,20 @@ document.addEventListener("DOMContentLoaded", () => {
 function checkAuthSession() {
   const token = safeStorage.getItem("token");
   
+  const loginContainer = document.getElementById("login-container");
+  const appContainer = document.getElementById("app-container");
+  const footerUser = document.getElementById("footer-user-panel");
+  const footerGuest = document.getElementById("footer-guest-panel");
+
   if (token && currentUser) {
-    // Session is valid
-    const loginContainer = document.getElementById("login-container");
-    const appContainer = document.getElementById("app-container");
+    // Sesi Valid (Admin atau Publik terdaftar)
     if (loginContainer) loginContainer.classList.add("hidden");
     if (appContainer) appContainer.classList.remove("hidden");
+    if (footerUser) footerUser.classList.remove("hidden");
+    if (footerGuest) footerGuest.classList.add("hidden");
+
+    // Tampilkan menu khusus pengguna terdaftar
+    document.querySelectorAll(".logged-in-only").forEach(el => el.classList.remove("hidden"));
 
     // Set User Profile UI info
     const userNameEl = document.getElementById("user-display-name");
@@ -391,22 +410,34 @@ function checkAuthSession() {
         (currentLanguage === 'id' ? "Publik (Hanya Lihat)" : "Public (View Only)");
     }
 
-    // Toggle Admin menus
+    // Tampilkan menu khusus Admin
     if (currentUser.role === "admin") {
       document.querySelectorAll(".admin-only").forEach(el => el.classList.remove("hidden"));
     } else {
       document.querySelectorAll(".admin-only").forEach(el => el.classList.add("hidden"));
     }
 
-    // Load initial configurations (Settings, ticker, etc.)
     loadAppConfigs();
     navigateToView(currentView);
   } else {
-    // Show login page
-    const loginContainer = document.getElementById("login-container");
-    const appContainer = document.getElementById("app-container");
-    if (loginContainer) loginContainer.classList.remove("hidden");
-    if (appContainer) appContainer.classList.add("hidden");
+    // AKSES PUBLIK TANPA LOGIN (GUEST MODE)
+    // Sembunyikan form login penuh, tampilkan langsung live CCTV dan map!
+    if (loginContainer) loginContainer.classList.add("hidden");
+    if (appContainer) appContainer.classList.remove("hidden");
+    if (footerUser) footerUser.classList.add("hidden");
+    if (footerGuest) footerGuest.classList.remove("hidden");
+
+    // Sembunyikan seluruh menu admin/privat dari publik nirkabel
+    document.querySelectorAll(".admin-only").forEach(el => el.classList.add("hidden"));
+    document.querySelectorAll(".logged-in-only").forEach(el => el.classList.add("hidden"));
+
+    // Set view default publik ke "live" (Live CCTV)
+    if (currentView === "dashboard" || currentView === "records" || currentView === "cameras" || currentView === "users" || currentView === "settings") {
+      currentView = "live";
+    }
+
+    loadAppConfigs();
+    navigateToView(currentView);
   }
   
   hideLoader();
@@ -3086,5 +3117,62 @@ async function handleAdminReboot() {
     console.error("Admin Reboot failed:", err.message);
     showToast(err.message, "error");
     hideLoader();
+  }
+}
+
+// ================= AKSI AKSES PUBLIK / MODAL LOGIN GUEST =================
+function showLoginModal() {
+  const loginContainer = document.getElementById("login-container");
+  if (loginContainer) {
+    loginContainer.classList.remove("hidden");
+    // Fokuskan input username
+    const usernameInput = document.getElementById("login-username");
+    if (usernameInput) usernameInput.focus();
+  }
+}
+
+function hideLoginModal() {
+  const loginContainer = document.getElementById("login-container");
+  if (loginContainer) {
+    loginContainer.classList.add("hidden");
+  }
+}
+
+// ================= AKSI COLLAPSE SIDEBAR UTAMA (1 FRAME PENUH) =================
+function toggleSidebar() {
+  const container = document.getElementById("app-container");
+  if (!container) return;
+
+  container.classList.toggle("sidebar-collapsed");
+  
+  // Segarkan ukuran peta Leaflet jika peta sedang aktif agar frame penuh proporsional!
+  if (mapInstance && currentView === "map") {
+    setTimeout(() => {
+      mapInstance.invalidateSize();
+    }, 300);
+  }
+}
+
+// ================= AKSI GANTI TEMA (GELAP / TERANG - GLASSMORPHISM) =================
+function toggleTheme() {
+  const body = document.body;
+  const icon = document.getElementById("theme-toggle-icon");
+  if (!body || !icon) return;
+
+  const isLight = body.classList.contains("light-mode");
+  if (isLight) {
+    // Ganti ke Gelaap (Default)
+    body.classList.remove("light-mode");
+    icon.classList.remove("fa-moon", "text-indigo-400");
+    icon.classList.add("fa-sun", "text-amber-400");
+    safeStorage.setItem("theme", "dark");
+    showToast("Tema Gelap (Default Glassmorphism) Diaktifkan!", "success");
+  } else {
+    // Ganti ke Terang
+    body.classList.add("light-mode");
+    icon.classList.remove("fa-sun", "text-amber-400");
+    icon.classList.add("fa-moon", "text-indigo-400");
+    safeStorage.setItem("theme", "light");
+    showToast("Tema Terang Premium Diaktifkan!", "success");
   }
 }

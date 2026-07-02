@@ -90,3 +90,97 @@
 .opacity-0 {
   pointer-events: none !important;
 }
+
+/* ================= THEME: LIGHT MODE OVERRIDES ================= */
+body.light-mode {
+  background-color: #f8fafc !important; /* bg-slate-50 */
+  color: #0f172a !important;            /* text-slate-900 */
+}
+
+body.light-mode #sidebar,
+body.light-mode #ticker-bar,
+body.light-mode .bg-slate-900,
+body.light-mode .bg-slate-950 {
+  background-color: #ffffff !important; /* bg-white cards & sidebar */
+  border-color: #e2e8f0 !important;     /* border-slate-200 */
+  color: #1e293b !important;
+}
+
+body.light-mode #ticker-bar {
+  background-color: #2563eb !important; /* Keep blue for ticker but clean text */
+  color: #ffffff !important;
+}
+
+body.light-mode .text-slate-100,
+body.light-mode .text-slate-200,
+body.light-mode .text-white {
+  color: #0f172a !important;
+}
+
+body.light-mode .text-slate-300,
+body.light-mode .text-slate-400 {
+  color: #475569 !important;            /* text-slate-600 */
+}
+
+body.light-mode .border-slate-800,
+body.light-mode .border-slate-850 {
+  border-color: #e2e8f0 !important;     /* border-slate-200 */
+}
+
+body.light-mode input,
+body.light-mode select,
+body.light-mode textarea {
+  background-color: #f1f5f9 !important; /* bg-slate-100 inputs */
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+body.light-mode .nav-item {
+  color: #334155 !important;
+}
+
+body.light-mode .nav-item:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+body.light-mode .nav-item.active {
+  background-color: #2563eb !important; /* active blue brand */
+  color: #ffffff !important;
+  border-left-color: #3b82f6 !important;
+}
+
+body.light-mode #app-footer-text,
+body.light-mode .text-slate-500 {
+  color: #64748b !important;
+}
+
+body.light-mode .bg-slate-950\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+/* Sidebar Hide/Show transitions */
+#sidebar {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Collapsible Sidebar Layout Override */
+#app-container.sidebar-collapsed #sidebar {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  transform: translateX(-100%) !important;
+  border-right-width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Berikan ruang atas ekstra agar tombol hamburger melayang tidak menimpa judul halaman */
+#view-container {
+  padding-top: 3rem !important;
+}
+
+@media (max-width: 768px) {
+  #view-container {
+    padding-top: 1rem !important; /* Mobile top bar is already present, so no extra padding needed on mobile! */
+  }
+}

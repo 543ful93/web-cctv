@@ -1045,9 +1045,24 @@ function scanAndImportPhysicalRecords() {
 app.get('/api/records', auth(), (req,res)=>{
   scanAndImportPhysicalRecords(); // Auto-scan and register physical files!
   const cam = req.query.camera_id;
+  const isAdmin = req.user && req.user.role === 'admin';
+  
   let rows;
-  if(cam) rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id WHERE r.camera_id=? ORDER BY r.start_time DESC LIMIT 200').all(cam);
-  else rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id ORDER BY r.start_time DESC LIMIT 200').all();
+  if(isAdmin){
+    // Admin memiliki hak akses penuh untuk melihat semua rekaman
+    if(cam) {
+      rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id WHERE r.camera_id=? ORDER BY r.start_time DESC LIMIT 200').all(cam);
+    } else {
+      rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id ORDER BY r.start_time DESC LIMIT 200').all();
+    }
+  } else {
+    // Publik / User Baru hanya diizinkan melihat rekaman dari kamera yang diizinkan (is_public = 1)
+    if(cam) {
+      rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id WHERE r.camera_id=? AND c.is_public=1 AND c.is_active=1 ORDER BY r.start_time DESC LIMIT 200').all(cam);
+    } else {
+      rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id WHERE c.is_public=1 AND c.is_active=1 ORDER BY r.start_time DESC LIMIT 200').all();
+    }
+  }
   res.json(rows);
 });
 app.delete('/api/records/:id', auth('admin'), (req,res)=>{
