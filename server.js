@@ -3,7 +3,7 @@ const cors = require('cors');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -18,6 +18,224 @@ const HLS_DIR = path.join(__dirname, 'public', 'streams');
 const RECORD_DIR = process.env.RECORD_DIR || path.join(__dirname, 'public', 'records');
 const SNAP_DIR = path.join(__dirname, 'public', 'snapshots');
 const LOG_DIR = path.join(__dirname, 'logs');
+
+// STB HG680P tidak memiliki RTC. Paksa zona waktu aplikasi agar nama file dan DB
+// selalu WIB meskipun konfigurasi timezone Linux kembali ke UTC setelah mati listrik.
+const APP_TIMEZONE = process.env.TIMEZONE || process.env.TZ || 'Asia/Jakarta';
+process.env.TZ = APP_TIMEZONE;
+
+const localDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: APP_TIMEZONE,
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+  hourCycle: 'h23'
+});
+
+// Jika proses Node tidak punya izin CAP_SYS_TIME (Docker/Linux non-root), offset
+// aplikasi tetap membuat nama file, DB, dashboard, dan scheduler 100% sinkron.
+let appClockOffsetMs = 0;
+function appNow() {
+  return new Date(Date.now() + appClockOffsetMs);
+}
+
+function localDateParts(date = appNow()) {
+  const values = {};
+  localDateFormatter.formatToParts(date).forEach(part => {
+    if (part.type !== 'literal') values[part.type] = part.value;
+  });
+  const datePart = `${values.year}-${values.month}-${values.day}`;
+  const timePart = `${values.hour}:${values.minute}:${values.second}`;
+  return {
+    sql: `${datePart} ${timePart}`,
+    file: `${datePart}T${timePart.replace(/:/g, '-')}`,
+    iso_local: `${datePart}T${timePart}`
+  };
+}
+
+function localNowSql() {
+  return localDateParts(appNow()).sql;
+}
+
+function isSystemClockValid() {
+  const year = appNow().getUTCFullYear();
+  return Number.isFinite(year) && year >= 2024 && year <= 2038;
+}
+
+const timeSyncState = {
+  inProgress: false,
+  ready: false,
+  synced: false,
+  source: 'system-clock',
+  trigger: null,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  offsetMs: 0,
+  error: null
+};
+let timeSyncPromise = null;
+
+function runTimeCommand(command, args, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout, encoding: 'utf8' }, (err, stdout, stderr) => {
+      if (err) return reject(new Error((stderr || err.message || '').trim()));
+      resolve((stdout || stderr || '').trim());
+    });
+  });
+}
+
+// Fallback jika UDP/123 diblokir ISP: ambil header Date melalui HTTP biasa,
+// lalu set jam Linux. Ini tetap sangat ringan dan hanya dipakai jika ntpdate gagal.
+function fetchHttpNetworkTime() {
+  const endpoints = [
+    { host: 'www.google.com', path: '/generate_204' },
+    { host: 'cloudflare.com', path: '/cdn-cgi/trace' }
+  ];
+
+  return new Promise((resolve, reject) => {
+    let index = 0;
+    const tryNext = () => {
+      if (index >= endpoints.length) return reject(new Error('server waktu HTTP tidak dapat dihubungi'));
+      const endpoint = endpoints[index++];
+      const started = Date.now();
+      const req = http.get({
+        hostname: endpoint.host,
+        path: endpoint.path,
+        headers: { 'User-Agent': 'Web-CCTV-TimeSync/2.7', Connection: 'close' },
+        timeout: 5000
+      }, response => {
+        response.resume();
+        const remoteMs = Date.parse(response.headers.date || '');
+        if (Number.isFinite(remoteMs)) {
+          // Kompensasi setengah waktu perjalanan jaringan agar deviasi tetap kecil.
+          return resolve(remoteMs + Math.floor((Date.now() - started) / 2));
+        }
+        tryNext();
+      });
+      req.on('timeout', () => req.destroy(new Error('timeout')));
+      req.on('error', tryNext);
+    };
+    tryNext();
+  });
+}
+
+async function syncSystemClock(trigger = 'auto') {
+  if (timeSyncPromise) return timeSyncPromise;
+
+  timeSyncPromise = (async () => {
+    timeSyncState.inProgress = true;
+    timeSyncState.trigger = trigger;
+    timeSyncState.lastAttemptAt = new Date().toISOString();
+    timeSyncState.error = null;
+
+    try {
+      // Di PC Windows/macOS jam dikelola OS. Aplikasi tetap memformat rekaman
+      // memakai APP_TIMEZONE tanpa mencoba mengubah jam komputer pengguna.
+      if (process.platform !== 'linux') {
+        appClockOffsetMs = 0;
+        timeSyncState.offsetMs = 0;
+        timeSyncState.synced = isSystemClockValid();
+        timeSyncState.source = 'operating-system';
+        if (!timeSyncState.synced) throw new Error('Jam sistem operasi tidak valid');
+      } else {
+        // Mengatur timezone boleh gagal di image Armbian minimal; formatter Node.js
+        // di atas tetap menjamin seluruh timestamp aplikasi menggunakan WIB.
+        try { await runTimeCommand('timedatectl', ['set-timezone', APP_TIMEZONE], 4000); } catch {}
+
+        const canAdjustSystemClock = (!process.getuid || process.getuid() === 0) && !fs.existsSync('/.dockerenv');
+        const methods = canAdjustSystemClock ? [
+          { source: 'ntpdate:id.pool.ntp.org', command: 'ntpdate', args: ['-u', '-b', 'id.pool.ntp.org'] },
+          { source: 'ntpdate:pool.ntp.org', command: 'ntpdate', args: ['-u', '-b', 'pool.ntp.org'] },
+          { source: 'busybox-ntpd', command: 'busybox', args: ['ntpd', '-n', '-q', '-p', 'id.pool.ntp.org'] },
+          { source: 'chrony', command: 'chronyc', args: ['-a', 'makestep'] }
+        ] : [];
+
+        let synced = false;
+        let lastError = null;
+        for (const method of methods) {
+          try {
+            await runTimeCommand(method.command, method.args, 10000);
+            appClockOffsetMs = 0;
+            timeSyncState.offsetMs = 0;
+            timeSyncState.source = method.source;
+            synced = true;
+            break;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+
+        if (!synced) {
+          try {
+            const remoteMs = await fetchHttpNetworkTime();
+            if (!Number.isFinite(remoteMs)) throw new Error('waktu HTTP tidak valid');
+            try {
+              if (!canAdjustSystemClock) throw new Error('menggunakan offset aplikasi');
+              await runTimeCommand('date', ['-u', '-s', `@${Math.floor(remoteMs / 1000)}`], 5000);
+              appClockOffsetMs = 0;
+              timeSyncState.offsetMs = 0;
+              timeSyncState.source = 'http-date-system';
+            } catch {
+              // Tanpa akses root, gunakan offset hanya di aplikasi. Scheduler,
+              // nama berkas, database, dan UI tetap sinkron dengan waktu internet.
+              appClockOffsetMs = remoteMs - Date.now();
+              timeSyncState.offsetMs = Math.round(appClockOffsetMs);
+              timeSyncState.source = 'http-date-app-offset';
+            }
+            synced = true;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+
+        if (!synced || !isSystemClockValid()) {
+          throw new Error(lastError?.message || 'sinkronisasi NTP gagal');
+        }
+        timeSyncState.synced = true;
+      }
+
+      timeSyncState.lastSuccessAt = appNow().toISOString();
+      console.log(`🕐 Jam STB sinkron via ${timeSyncState.source}: ${localNowSql()} (${APP_TIMEZONE})`);
+      return { success: true, ...getSystemTimeStatus() };
+    } catch (err) {
+      timeSyncState.synced = false;
+      timeSyncState.error = err.message;
+      console.warn(`⚠️ Sinkronisasi jam gagal (${trigger}): ${err.message}`);
+      return { success: false, ...getSystemTimeStatus() };
+    } finally {
+      timeSyncState.inProgress = false;
+      timeSyncState.ready = true;
+    }
+  })();
+
+  const currentSync = timeSyncPromise;
+  try {
+    return await currentSync;
+  } finally {
+    if (timeSyncPromise === currentSync) timeSyncPromise = null;
+  }
+}
+
+function getSystemTimeStatus() {
+  const now = appNow();
+  const local = localDateParts(now);
+  return {
+    epoch_ms: now.getTime(),
+    local_time: local.sql,
+    iso_local: local.iso_local,
+    timezone: APP_TIMEZONE,
+    timezone_label: APP_TIMEZONE === 'Asia/Jakarta' ? 'WIB' : APP_TIMEZONE,
+    valid: isSystemClockValid(),
+    synced: timeSyncState.synced,
+    in_progress: timeSyncState.inProgress,
+    ready: timeSyncState.ready,
+    source: timeSyncState.source,
+    trigger: timeSyncState.trigger,
+    last_attempt_at: timeSyncState.lastAttemptAt,
+    last_success_at: timeSyncState.lastSuccessAt,
+    offset_ms: timeSyncState.offsetMs,
+    error: timeSyncState.error
+  };
+}
 
 [HLS_DIR, RECORD_DIR, SNAP_DIR, LOG_DIR].forEach(d => { if(!fs.existsSync(d)) fs.mkdirSync(d,{recursive:true}); });
 
@@ -96,6 +314,39 @@ const setSetting = db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CO
 for(const [k,v] of Object.entries(defaultSettings)){
   if(!getSetting.get(k)) setSetting.run(k,v);
 }
+
+function physicalRecordPath(filePath) {
+  let relative = String(filePath || '').replace(/^\/+/, '');
+  if (relative.startsWith('records/')) relative = relative.slice('records/'.length);
+  const root = path.resolve(RECORD_DIR);
+  const candidate = path.resolve(root, relative);
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`) ? candidate : null;
+}
+
+// Jika listrik mati atau Node.js crash saat merekam, status lama tidak boleh
+// selamanya "recording". Pulihkan berdasarkan ukuran fisik MP4 ketika server hidup.
+function recoverInterruptedRecords() {
+  try {
+    const staleRows = db.prepare("SELECT * FROM records WHERE status='recording'").all();
+    if (!staleRows.length) return;
+    const update = db.prepare('UPDATE records SET end_time=?, size_mb=?, duration_sec=?, status=? WHERE id=?');
+    const recover = db.transaction(rows => {
+      rows.forEach(row => {
+        let sizeMb = 0;
+        try {
+          const file = physicalRecordPath(row.file_path);
+          if (file && fs.existsSync(file)) sizeMb = +(fs.statSync(file).size / 1024 / 1024).toFixed(2);
+        } catch {}
+        update.run(localNowSql(), sizeMb, Number(row.duration_sec || 0), sizeMb > 0.05 ? 'completed' : 'failed', row.id);
+      });
+    });
+    recover(staleRows);
+    console.log(`♻️ Memulihkan ${staleRows.length} status rekaman yang tertinggal akibat restart/crash.`);
+  } catch (err) {
+    console.warn('⚠️ Gagal memulihkan status rekaman lama:', err.message);
+  }
+}
+recoverInterruptedRecords();
 
 console.log('✓ SQLite:', DB_PATH);
 
@@ -834,134 +1085,186 @@ app.post('/api/cameras/:id/ptz', authOptional, async (req, res) => {
 
 // ===== RECORDING =====
 const activeRecords = new Map();
-function recordArgs(input, outputMp4, durationSec, camCodec = 'auto', useTcp = true){
-  const args = [];
-  if (useTcp) {
-    args.push('-rtsp_transport', 'tcp');
-  }
-  args.push('-i', input, '-t', String(durationSec));
+const recordRetryAfter = new Map();
 
-  const isH264 = camCodec === 'h264' || input.includes('h264') || input.includes('H264');
+function recordArgs(input, outputMp4, durationSec, camCodec = 'auto', useTcp = true) {
+  const args = ['-hide_banner', '-loglevel', 'warning'];
+  const isRtsp = /^rtsps?:\/\//i.test(input);
+
+  // Seluruh opsi INPUT wajib berada sebelum -i. Urutan yang salah membuat FFmpeg
+  // langsung berhenti dan menghasilkan MP4 0 byte pada kamera RTSP tertentu.
+  if (isRtsp && useTcp) args.push('-rtsp_transport', 'tcp');
+  if (isRtsp) args.push('-rw_timeout', '15000000');
+  args.push(
+    '-fflags', 'nobuffer',
+    '-flags', 'low_delay',
+    '-use_wallclock_as_timestamps', '1',
+    '-i', input,
+    '-t', String(durationSec)
+  );
+
+  const normalizedCodec = String(camCodec || '').toLowerCase();
+  const isH264 = normalizedCodec === 'h264' || /h264/i.test(input);
 
   if (isH264) {
-    // Jika kamera terdeteksi sudah H.264, COPY STREAM SAJA! Ini 0% CPU, sangat ringan & dingin di STB!
-    args.push('-c:v', 'copy', '-an', '-movflags', '+faststart', '-y', outputMp4);
+    // Kamera H.264 disalin langsung: nyaris 0% CPU dan paling aman untuk STB.
+    args.push('-map', '0:v:0', '-c:v', 'copy', '-an', '-movflags', '+faststart', '-y', outputMp4);
   } else {
-    // Mengubah HEVC (H.265) menjadi H.264 Baseline secara sangat ringan (Ultrafast)
-    // Ini mutlak diperlukan agar hasil rekaman bisa diputar langsung di semua Web Browser / HP (H.265 tidak didukung browser).
-    // Menggunakan skala 540p dan 15fps untuk menjaga CPU STB HG680P tetap dingin (<30% CPU).
+    // H.265/codec lain ditranscode ke MP4 H.264 Baseline 540p @15fps agar
+    // langsung dapat diputar Chrome/Android dengan beban CPU serendah mungkin.
     args.push(
+      '-map', '0:v:0',
       '-c:v', 'libx264',
-      '-preset', 'ultrafast',      // Preset tercepat, beban CPU terendah pada STB
+      '-preset', 'ultrafast',
       '-tune', 'zerolatency',
-      '-profile:v', 'baseline', '-level', '3.0', // Kompatibilitas 100% pada HP/Browser
+      '-profile:v', 'baseline', '-level', '3.0',
       '-pix_fmt', 'yuv420p',
-      '-s', process.env.VIDEO_SIZE || '960x540', // Downscale ke 540p untuk menghemat pixel encoding & disk hdd
-      '-r', '15',                  // Frame rate 15fps (standar CCTV) menghemat 50% daya CPU
-      '-b:v', '800k',              // Bitrate optimal untuk kualitas jernih dan hemat penyimpanan
+      '-s', process.env.VIDEO_SIZE || '960x540',
+      '-r', '15',
+      '-b:v', process.env.VIDEO_BITRATE || '800k',
       '-movflags', '+faststart',
-      '-an',                       // Nonaktifkan audio untuk menghindari crash wadah MP4 akibat PCM G.711 IP Cam
+      '-an',
       '-y', outputMp4
     );
   }
   return args;
 }
-function startRecord(camera){
-  if(activeRecords.has(String(camera.id))) return {error:'already recording'};
 
-  // PENGAMAN MANDIRI: Deteksi jika hardisk lepas (unmounted) demi mengamankan SD Card dari kepenuhan
+function getActiveRecordMetrics(record) {
+  let sizeMb = 0;
+  try {
+    if (record.outPath && fs.existsSync(record.outPath)) {
+      sizeMb = +(fs.statSync(record.outPath).size / 1024 / 1024).toFixed(2);
+    }
+  } catch {}
+
+  let elapsedSec = 0;
+  try {
+    elapsedSec = Math.max(0, Math.floor(Number(process.hrtime.bigint() - record.startMonotonic) / 1e9));
+  } catch {}
+
+  return {
+    elapsed_sec: elapsedSec,
+    size_mb: sizeMb,
+    remaining_sec: Math.max(0, Number(record.duration || 0) - elapsedSec)
+  };
+}
+
+function startRecord(camera) {
+  const cameraKey = String(camera.id);
+  if (activeRecords.has(cameraKey)) return { error: 'Kamera ini sudah sedang direkam.' };
+
+  // Jangan pernah membuat nama file memakai jam reset/1970. Sinkronisasi startup
+  // berjalan lebih dulu dan scheduler akan mencoba lagi otomatis setelah selesai.
+  if (timeSyncState.inProgress) {
+    return { error: 'Jam STB sedang disinkronkan. Tunggu beberapa detik lalu mulai rekam kembali.' };
+  }
+  if (!isSystemClockValid()) {
+    syncSystemClock('record-guard').catch(() => {});
+    return { error: 'Tanggal STB belum valid. Sinkronisasi NTP sedang dijalankan; perekaman ditunda agar nama file tidak salah.' };
+  }
+
+  // PENGAMAN MANDIRI: Deteksi jika hardisk lepas (unmounted) demi mengamankan SD Card dari kepenuhan.
   if (RECORD_DIR.includes('/var/lib/webcctv/records')) {
     const guardFile = path.join(RECORD_DIR, '.cctv_hdd_active');
     if (!fs.existsSync(guardFile)) {
-      console.warn("⚠️ PERINGATAN: Berkas pengaman .cctv_hdd_active tidak ditemukan! Mencoba melakukan mount ulang...");
+      console.warn('⚠️ Berkas pengaman HDD tidak ditemukan. Mencoba mount -a...');
       try {
         const { execSync } = require('child_process');
         execSync('mount -a', { stdio: 'ignore' });
       } catch (e) {
-        console.error("❌ Gagal me-mount ulang hardisk otomatis:", e.message);
+        console.error('❌ Gagal me-mount ulang hardisk:', e.message);
       }
-      
       if (!fs.existsSync(guardFile)) {
-        console.error("❌ EROR FATAL: Hardisk 500GB terputus (unmounted)! Perekaman DIBATALKAN demi mengamankan SD Card.");
-        return { error: 'Penyimpanan Hardisk Terputus (Unmounted)! Harap periksa koneksi kabel USB atau adaptor daya STB.' };
+        return { error: 'Penyimpanan Hardisk Terputus (Unmounted)! Periksa kabel USB/adaptor daya STB.' };
       }
     }
   }
 
-  const camDir = path.join(RECORD_DIR, String(camera.id));
-  if(!fs.existsSync(camDir)) fs.mkdirSync(camDir,{recursive:true});
-  
-  // Perbaikan Zona Waktu (Timezone Fix WIB/WITA/WIT): 
-  // Menghitung selisih waktu lokal STB agar jam perekaman di database & nama file sinkron secara real-time
-  const tzoffset = (new Date()).getTimezoneOffset() * 60000;
-  const localDate = new Date(Date.now() - tzoffset);
-  
-  const fname = `${localDate.toISOString().slice(0,19).replace(/[:.]/g,'-')}.mp4`;
+  const camDir = path.join(RECORD_DIR, cameraKey);
+  if (!fs.existsSync(camDir)) fs.mkdirSync(camDir, { recursive: true });
+
+  const localStart = localDateParts(appNow());
+  const fname = `${localStart.file}.mp4`;
   const outPath = path.join(camDir, fname);
-  const duration = camera.record_duration || 300;
-  const start_time = localDate.toISOString().slice(0,19).replace('T',' ');
-  const ins = db.prepare('INSERT INTO records (camera_id,start_time,status,file_path) VALUES (?,?,?,?)').run(camera.id, start_time, 'recording', `records/${camera.id}/${fname}`);
+  const duration = Math.min(86400, Math.max(10, parseInt(camera.record_duration, 10) || 300));
+  const start_time = localStart.sql;
+  const relativeFile = `records/${camera.id}/${fname}`;
+  const ins = db.prepare('INSERT INTO records (camera_id,start_time,status,file_path) VALUES (?,?,?,?)')
+    .run(camera.id, start_time, 'recording', relativeFile);
   const recordRowId = ins.lastInsertRowid;
   const streamUrl = cleanStreamUrl(camera.rtsp_url);
-  
-  // Create a log file for recording to debug any failures!
-  const logFile = path.join(LOG_DIR, `rec_${camera.id}.log`);
-  const logStream = fs.createWriteStream(logFile, {flags:'w'});
 
-  // Deteksi cerdas: Gunakan TCP jika kamera terdeteksi online via jabat tangan port 554
+  const logFile = path.join(LOG_DIR, `rec_${camera.id}.log`);
+  const logStream = fs.createWriteStream(logFile, { flags: 'w' });
   const statusObj = camStatus.get(camera.id) || { online: true, msg: 'tcp' };
   const useTcp = (statusObj.msg && statusObj.msg.includes('tcp')) || statusObj.online === true;
-
   const args = recordArgs(streamUrl, outPath, duration, camera.codec, useTcp);
-  logStream.write(`ffmpeg ${args.join(' ')}\n\n`);
+  logStream.write(`START ${start_time} ${APP_TIMEZONE}\nffmpeg ${args.join(' ')}\n\n`);
 
-  const ff = spawn('ffmpeg', args);
-  activeRecords.set(String(camera.id), {proc:ff, recordRowId});
-  
-  ff.stderr.on('data', d => {
-    logStream.write(d.toString());
-  });
+  const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const activeRecord = {
+    proc: ff,
+    recordRowId,
+    cameraId: Number(camera.id),
+    start_time,
+    started_epoch_ms: appNow().getTime(),
+    startMonotonic: process.hrtime.bigint(),
+    duration,
+    outPath,
+    file_path: relativeFile
+  };
+  activeRecords.set(cameraKey, activeRecord);
+
+  ff.stderr.on('data', data => logStream.write(data.toString()));
+
+  let finalized = false;
+  const finalizeRecord = (code, spawnError = null) => {
+    if (finalized) return;
+    finalized = true;
+
+    const metrics = getActiveRecordMetrics(activeRecord);
+    const end_time = localNowSql();
+    const finalStatus = !spawnError && (code === 0 || metrics.size_mb > 0.05) ? 'completed' :
+      (metrics.size_mb > 0.05 ? 'completed' : 'failed');
+
+    activeRecords.delete(cameraKey);
+    if (finalStatus === 'failed') {
+      // Kamera/RTSP yang offline tidak boleh di-spawn setiap 5 detik karena akan
+      // memboroskan CPU dan menumpuk baris gagal. Terapkan backoff ringan 30 detik.
+      recordRetryAfter.set(cameraKey, process.hrtime.bigint() + 30_000_000_000n);
+    } else {
+      recordRetryAfter.delete(cameraKey);
+    }
+    try {
+      db.prepare('UPDATE records SET end_time=?, size_mb=?, duration_sec=?, status=? WHERE id=?')
+        .run(end_time, metrics.size_mb, metrics.elapsed_sec, finalStatus, recordRowId);
+    } catch (dbErr) {
+      console.error(`❌ Gagal finalisasi DB rekaman ${recordRowId}:`, dbErr.message);
+    }
+
+    try {
+      logStream.end(`\nEND ${end_time}\nexit=${code} duration=${metrics.elapsed_sec}s size=${metrics.size_mb}MB status=${finalStatus}${spawnError ? ` error=${spawnError.message}` : ''}\n`);
+    } catch {}
+
+    console.log(`■ record cam ${camera.id} selesai: ${metrics.elapsed_sec}s ${metrics.size_mb}MB -> ${finalStatus}`);
+    autoCleanupDisk();
+  };
 
   ff.on('error', err => {
-    console.error(`❌ FFmpeg spawn error for recording cam ${camera.id}:`, err.message);
-    logStream.write(`\n❌ SPAWN ERROR: ${err.message}\n`);
-    logStream.end();
-    activeRecords.delete(String(camera.id));
-    
-    // Perbaikan Jam Lokal STB untuk waktu gagal
-    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
-    const end_time = new Date(Date.now() - tzoffset).toISOString().slice(0,19).replace('T',' ');
-    
-    db.prepare("UPDATE records SET status='failed', end_time=? WHERE id=?")
-      .run(end_time, recordRowId);
+    console.error(`❌ FFmpeg rekaman kamera ${camera.id} gagal dijalankan:`, err.message);
+    finalizeRecord(null, err);
   });
+  ff.on('close', code => finalizeRecord(code));
 
-  ff.on('close', code=>{
-    logStream.end(`\nexit ${code}\n`);
-    activeRecords.delete(String(camera.id));
-    
-    // Perbaikan Penghitungan Jam Lokal STB (Timezone Fix WIB/WITA/WIT)
-    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
-    const end_time = new Date(Date.now() - tzoffset).toISOString().slice(0,19).replace('T',' ');
-    
-    let size_mb = 0;
-    try {
-      if (fs.existsSync(outPath)) {
-        size_mb = +(fs.statSync(outPath).size / 1024 / 1024).toFixed(2);
-      }
-    } catch(e) {}
-    
-    // PERBAIKAN EMAS: Jika ukuran file > 0.05 MB, tandai sebagai 'completed' (Sukses)
-    // Hal ini karena penghentian manual (SIGINT) mengembalikan exit code 130 atau null, namun berkas MP4-nya sebenarnya sukses & utuh!
-    const finalStatus = (code === 0 || size_mb > 0.05) ? 'completed' : 'failed';
-    
-    db.prepare('UPDATE records SET end_time=?, size_mb=?, duration_sec=?, status=? WHERE id=?')
-      .run(end_time, size_mb, duration, finalStatus, recordRowId);
-      
-    console.log(`■ record cam ${camera.id} done ${code} ${size_mb}MB -> Status: ${finalStatus}`);
-    autoCleanupDisk(); // Run automatic circular cleanup!
-  });
-  return {success:true, file:`/records/${camera.id}/${fname}`, record_id: recordRowId};
+  return {
+    success: true,
+    file: `/${relativeFile}`,
+    record_id: Number(recordRowId),
+    start_time,
+    started_epoch_ms: activeRecord.started_epoch_ms,
+    duration_sec: duration
+  };
 }
 app.post('/api/record/:id/start', auth('admin'), (req,res)=>{
   const cam = db.prepare('SELECT * FROM cameras WHERE id=?').get(req.params.id);
@@ -979,13 +1282,22 @@ app.post('/api/record/:id/stop', auth('admin'), (req,res)=>{
 });
 app.get('/api/record/active', authOptional, (req, res) => {
   const activeList = [];
-  activeRecords.forEach((val, key) => {
+  activeRecords.forEach((record, key) => {
     try {
-      const cam = db.prepare('SELECT name FROM cameras WHERE id=?').get(key);
+      const cam = db.prepare('SELECT name, is_public, is_active FROM cameras WHERE id=?').get(key);
+      if (!cam) return;
+      if ((!req.user || req.user.role !== 'admin') && (!cam.is_public || !cam.is_active)) return;
+
+      const metrics = getActiveRecordMetrics(record);
       activeList.push({
-        camera_id: parseInt(key),
-        camera_name: cam ? cam.name : `Camera ${key}`,
-        recordRowId: val.recordRowId
+        camera_id: parseInt(key, 10),
+        camera_name: cam.name || `Camera ${key}`,
+        recordRowId: Number(record.recordRowId),
+        start_time: record.start_time,
+        started_epoch_ms: record.started_epoch_ms,
+        duration_limit_sec: record.duration,
+        file_path: record.file_path,
+        ...metrics
       });
     } catch (e) {
       console.error(e);
@@ -995,7 +1307,12 @@ app.get('/api/record/active', authOptional, (req, res) => {
 });
 
 // automatic physical file scanning and database indexing
+let lastPhysicalRecordScanMonotonic = 0n;
 function scanAndImportPhysicalRecords() {
+  const nowMonotonic = process.hrtime.bigint();
+  if (lastPhysicalRecordScanMonotonic && nowMonotonic - lastPhysicalRecordScanMonotonic < 60_000_000_000n) return;
+  lastPhysicalRecordScanMonotonic = nowMonotonic;
+
   try {
     if (!fs.existsSync(RECORD_DIR)) return;
     const camDirs = fs.readdirSync(RECORD_DIR);
@@ -1022,15 +1339,16 @@ function scanAndImportPhysicalRecords() {
             if (parts.length === 2) {
               startTimeStr = `${parts[0]} ${parts[1].replace(/-/g, ':')}`;
             } else {
-              startTimeStr = fs.statSync(fullPath).mtime.toISOString().slice(0, 19).replace('T', ' ');
+              startTimeStr = localDateParts(fs.statSync(fullPath).mtime).sql;
             }
           } catch {
-            startTimeStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            startTimeStr = localNowSql();
           }
           try {
+            const importedStatus = sizeMb > 0.05 ? 'completed' : 'failed';
             db.prepare('INSERT INTO records (camera_id, start_time, end_time, file_path, size_mb, duration_sec, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
-              .run(cameraId, startTimeStr, startTimeStr, relativePath, sizeMb, 0, 'completed');
-            console.log(`📥 Auto-indexed physical recording to SQLite: ${relativePath}`);
+              .run(cameraId, startTimeStr, startTimeStr, relativePath, sizeMb, 0, importedStatus);
+            console.log(`📥 Auto-indexed physical recording to SQLite: ${relativePath} (${importedStatus})`);
           } catch (dbErr) {
             console.error(`Auto-index DB insert fail for ${relativePath}:`, dbErr.message);
           }
@@ -1063,6 +1381,27 @@ app.get('/api/records', auth(), (req,res)=>{
       rows = db.prepare('SELECT r.*, c.name as camera_name FROM records r LEFT JOIN cameras c ON c.id=r.camera_id WHERE c.is_public=1 AND c.is_active=1 ORDER BY r.start_time DESC LIMIT 200').all();
     }
   }
+
+  // Baris yang masih direkam diberi ukuran dan durasi aktual tanpa menulis SQLite
+  // setiap detik. Dengan ini tabel UI benar-benar bergerak real-time namun HDD/SD
+  // Card tetap awet karena tidak terkena write amplification.
+  rows = rows.map(row => {
+    if (row.status !== 'recording') return row;
+    let active = null;
+    activeRecords.forEach(record => {
+      if (Number(record.recordRowId) === Number(row.id)) active = record;
+    });
+    if (!active) return row;
+    const metrics = getActiveRecordMetrics(active);
+    return {
+      ...row,
+      duration_sec: metrics.elapsed_sec,
+      size_mb: metrics.size_mb,
+      remaining_sec: metrics.remaining_sec,
+      started_epoch_ms: active.started_epoch_ms
+    };
+  });
+
   res.json(rows);
 });
 app.delete('/api/records/:id', auth('admin'), (req,res)=>{
@@ -1143,6 +1482,25 @@ app.get('/api/system/storage', authOptional, async (req, res) => {
     ...disk,
     records_size_mb: recordsSizeMb
   });
+});
+
+// Status jam server dipakai UI sebagai sumber tunggal tanggal rekaman. Dengan
+// demikian jam yang terlihat di dashboard sama persis dengan nama file/SQLite.
+app.get('/api/system/time', authOptional, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(getSystemTimeStatus());
+});
+
+app.post('/api/admin/time-sync', auth('admin'), async (req, res) => {
+  const result = await syncSystemClock('manual-admin');
+  const payload = { success: result.success === true, ...getSystemTimeStatus() };
+  if (!payload.success) {
+    return res.status(503).json({
+      ...payload,
+      error: payload.error || 'Gagal menghubungi server NTP. Periksa koneksi internet STB.'
+    });
+  }
+  res.json(payload);
 });
 
 app.get('/api/system/specs', authOptional, (req, res) => {
@@ -1426,31 +1784,70 @@ app.get('/api/dashboard', authOptional, (req,res)=>{
   res.json({ totalCam, activeCam, totalUsers, totalRecords, recordsSizeMb, streamingNow, recordingNow, online, offline, unknown });
 });
 
-// cron record
-function matchCron(cronStr, date){
-  try{
-    const [m,h] = cronStr.trim().split(' ');
-    const mm = date.getMinutes(); const hh = date.getHours();
-    const mOk = m === '*' || m === String(mm) || (m.startsWith('*/') && mm % parseInt(m.slice(2))===0);
-    const hOk = !h || h === '*' || h === String(hh);
-    return mOk && hOk;
-  }catch{ return false }
+// ===== SCHEDULER REKAMAN REAL-TIME =====
+const lastCronTrigger = new Map();
+
+function scheduleClock(date = appNow()) {
+  const local = localDateParts(date).sql;
+  const [day, time] = local.split(' ');
+  const [hour, minute] = time.split(':').map(Number);
+  return { minute, hour, key: `${day}-${time.slice(0, 5)}` };
 }
-setInterval(()=>{
-  const now = new Date();
+
+function matchCron(cronStr, date) {
+  try {
+    const [minuteRule, hourRule] = cronStr.trim().split(/\s+/);
+    const clock = scheduleClock(date);
+    const step = minuteRule.startsWith('*/') ? parseInt(minuteRule.slice(2), 10) : 0;
+    const minuteOk = minuteRule === '*' || minuteRule === String(clock.minute) || (step > 0 && clock.minute % step === 0);
+    const hourOk = !hourRule || hourRule === '*' || hourRule === String(clock.hour);
+    return minuteOk && hourOk;
+  } catch {
+    return false;
+  }
+}
+
+function runRecordScheduler() {
+  const now = appNow();
+  if (timeSyncState.inProgress) return;
+  if (!isSystemClockValid()) {
+    syncSystemClock('scheduler-guard').catch(() => {});
+    return;
+  }
+
+  const clock = scheduleClock(now);
   const cams = db.prepare('SELECT * FROM cameras WHERE record_enabled=1 AND is_active=1').all();
-  autoCleanupDisk(); // Run automatic circular cleanup check before starting new files!
-  cams.forEach(cam=>{
-    const sched = cam.record_schedule || '0 * * * *';
-    const isContinuous = (sched === '24h' || sched === '* * * * *');
-    if (isContinuous || matchCron(sched, now)) {
-      if(!activeRecords.has(String(cam.id))){
-        console.log(`⏺ auto record cam ${cam.id} ${cam.name} (Sched: ${sched})`);
-        startRecord(cam);
+  cams.forEach(cam => {
+    const cameraKey = String(cam.id);
+    const sched = String(cam.record_schedule || '0 * * * *').trim();
+    const isContinuous = sched === '24h' || sched === '* * * * *';
+    if (activeRecords.has(cameraKey)) return;
+    const retryAfter = recordRetryAfter.get(cameraKey);
+    if (retryAfter && process.hrtime.bigint() < retryAfter) return;
+    if (retryAfter) recordRetryAfter.delete(cameraKey);
+
+    if (isContinuous) {
+      // Maksimal jeda antarfail hanya 5 detik, bukan 60 detik seperti versi lama.
+      const result = startRecord(cam);
+      if (result.success) console.log(`⏺ rekaman 24 jam kamera ${cam.id} dimulai real-time`);
+      return;
+    }
+
+    if (matchCron(sched, now) && lastCronTrigger.get(cameraKey) !== clock.key) {
+      const result = startRecord(cam);
+      // Tandai menit hanya jika FFmpeg benar-benar berhasil dibuat; bila HDD/jam
+      // belum siap, scheduler tetap mencoba lagi pada tick berikutnya.
+      if (result.success) {
+        lastCronTrigger.set(cameraKey, clock.key);
+        console.log(`⏺ jadwal rekam kamera ${cam.id} ${cam.name} (${sched})`);
       }
     }
   });
-}, 60*1000);
+}
+
+setTimeout(runRecordScheduler, 5000);
+setInterval(runRecordScheduler, 5000);
+setInterval(autoCleanupDisk, 5 * 60 * 1000);
 
 // static
 app.use('/streams', express.static(HLS_DIR, {
@@ -1538,14 +1935,22 @@ function autoClearCaches() {
 // Jalankan pembersihan cache RAM & HLS otomatis setiap 10 menit sekali!
 setInterval(autoClearCaches, 10 * 60 * 1000);
 
-// Pemicu Pembersihan CPU & RAM tambahan setiap 30 menit!
+// Koreksi drift jam setiap 30 menit. Hanya satu proses sinkronisasi dapat aktif,
+// sehingga aman walaupun tombol manual ditekan bersamaan dengan jadwal otomatis.
 setInterval(() => {
-  autoCleanupDisk();
-  // Jalankan ntpdate penyelarasan jam otomatis jika ntpdate terpasang
-  const { exec } = require('child_process');
-  exec("ntpdate id.pool.ntp.org", () => {});
+  syncSystemClock('interval-30m').catch(() => {});
 }, 30 * 60 * 1000);
 
-app.listen(PORT,'0.0.0.0', ()=>{
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Web-CCTV v2.7 http://0.0.0.0:${PORT}`);
+  console.log(`🕐 Zona waktu rekaman: ${APP_TIMEZONE}`);
+
+  // Sinkronkan segera setelah server hidup. Jika jaringan belum siap saat boot,
+  // ulangi sekali setelah 60 detik; interval 30 menit akan menjaga drift berikutnya.
+  setTimeout(async () => {
+    const firstSync = await syncSystemClock('startup');
+    if (!firstSync.success) {
+      setTimeout(() => syncSystemClock('startup-retry').catch(() => {}), 60 * 1000);
+    }
+  }, 250);
 });

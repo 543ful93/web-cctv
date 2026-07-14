@@ -147,23 +147,35 @@ Untuk melindungi SD Card dari kepenuhan file video akibat unmount mendadak, kami
    - Server secara otomatis mengeksekusi shell asinkron **`mount -a`** untuk mencoba mengaitkan kembali hardisk Anda.
    - Jika upaya mount ulang gagal (kabel USB lepas atau mati daya), **server akan secara paksa membatalkan proses perekaman** dan memunculkan error di log database. SD Card Anda **100% aman dan bebas dari bahaya kepenuhan data rekaman**!
 
-### C. Sinkronisasi Jam & Waktu Lokal STB (Timezone Fix)
-STB HG680P/B860H tidak memiliki baterai CMOS internal (*Hardware RTC*), sehingga jam STB akan reset setiap kali STB dimatikan atau mati lampu. 
-Sistem v2.7 secara otomatis menghitung selisih waktu lokal STB saat membuat nama file dan menyimpan log database (WIB/WITA/WIT). Namun, Anda **wajib** menyelaraskan zona waktu Armbian Anda dengan server waktu atom (NTP) agar jam STB selalu akurat secara real-time:
+### C. Sinkronisasi Otomatis Tanggal & Jam Rekaman (NTP + WIB)
+STB HG680P/B860H tidak memiliki baterai CMOS internal (*Hardware RTC*), sehingga jam dapat mundur/reset setelah mati listrik. v2.7 sekarang memakai **satu sumber waktu server** untuk dashboard, nama MP4, jadwal, serta kolom SQLite dan memaksa zona `Asia/Jakarta` (WIB) walaupun timezone Linux kembali ke UTC.
 
-1. **Atur Zona Waktu Lokal (Contoh: Asia/Jakarta untuk WIB)**:
-   ```bash
-   sudo timedatectl set-timezone Asia/Jakarta
-   ```
-2. **Aktifkan Sinkronisasi Waktu Otomatis (NTP)**:
-   ```bash
-   sudo timedatectl set-ntp true
-   ```
-3. **Mulai Ulang Layanan Waktu**:
-   ```bash
-   sudo systemctl restart systemd-timesyncd
-   ```
-*Begitu STB terhubung ke internet (via Wi-Fi atau LAN), jam STB otomatis sinkron dengan detik yang tepat, dan nama berkas video rekaman Anda akan 100% cocok dengan jam dinding rumah Anda secara real-time!*
+Sistem otomatis:
+
+1. Menyinkronkan jam saat Web-CCTV mulai (*startup*) dan mengulang 60 detik kemudian bila jaringan belum siap.
+2. Mengoreksi drift setiap 30 menit melalui `id.pool.ntp.org`, `pool.ntp.org`, BusyBox NTP/Chrony, lalu **HTTP Date fallback** jika UDP port 123 diblokir.
+3. Menolak sementara perekaman jika tahun STB masih tidak valid (misalnya 1970), sehingga tidak ada lagi nama file bertanggal salah.
+4. Memulihkan status `recording` yang tertinggal setelah crash/mati listrik menjadi `completed`/`failed` berdasarkan ukuran fisik MP4.
+5. Menyediakan tombol **Pengaturan → Sinkronisasi Tanggal & Jam Rekaman → Sinkronkan Tanggal Sekarang** (khusus Admin).
+
+Pastikan `ntpdate` tersedia pada instalasi lama:
+
+```bash
+sudo apt update
+sudo apt install -y ntpdate
+sudo timedatectl set-timezone Asia/Jakarta
+sudo ntpdate -u -b id.pool.ntp.org
+sudo systemctl restart webcctv
+```
+
+Cek hasilnya melalui UI atau terminal:
+
+```bash
+date
+journalctl -u webcctv -n 100 --no-pager | grep -E "Jam STB|Sinkronisasi jam"
+```
+
+> Armbian minimal sering tidak memiliki `systemd-timesyncd`; karena itu Web-CCTV menjalankan `ntpdate` secara langsung dan tidak bergantung pada layanan tersebut. Scheduler 24 jam diperiksa setiap 5 detik, sedangkan durasi/ukuran rekaman aktif bergerak real-time di UI tanpa menulis SQLite setiap detik.
 
 ---
 

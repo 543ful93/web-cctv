@@ -293,6 +293,13 @@
                   <span class="text-slate-400">Memori RAM</span>
                   <span id="sys-ram" class="font-mono font-semibold text-slate-200">-- / -- GB</span>
                 </li>
+                <li class="flex justify-between border-b border-slate-800 pb-1.5 gap-3">
+                  <span class="text-slate-400">Jam Rekaman STB</span>
+                  <span class="text-right">
+                    <span id="sys-record-time" class="font-mono font-semibold text-slate-200 block">--</span>
+                    <span id="sys-time-sync" class="text-[9px] text-amber-400 block">Memeriksa NTP...</span>
+                  </span>
+                </li>
                 <li class="flex justify-between border-b border-slate-800 pb-1.5">
                   <span class="text-slate-400">NodeJS</span>
                   <span class="font-mono">v18 / v20</span>
@@ -633,6 +640,32 @@
               </div>
               <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition cursor-pointer border-0" data-i18n="save">Simpan Perubahan</button>
             </form>
+          </div>
+
+          <!-- Recording Date/Time Synchronization Panel -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 space-y-4 shadow-lg admin-only hidden">
+            <h3 class="font-bold text-sm md:text-base border-b border-slate-800 pb-2 text-cyan-400 flex items-center space-x-2">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>Sinkronisasi Tanggal & Jam Rekaman</span>
+            </h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+              <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                <span class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Waktu STB Sekarang</span>
+                <div id="time-sync-current" class="font-mono text-base md:text-lg font-bold text-white">--</div>
+                <div class="flex flex-wrap gap-2 text-[10px]">
+                  <span id="time-sync-zone" class="px-2 py-1 rounded bg-blue-500/10 text-blue-400">Asia/Jakarta (WIB)</span>
+                  <span id="time-sync-status" class="px-2 py-1 rounded bg-amber-500/10 text-amber-400">Memeriksa...</span>
+                </div>
+                <p id="time-sync-detail" class="text-[10px] text-slate-500 break-words">Sumber waktu belum diperiksa.</p>
+              </div>
+              <div class="space-y-3 flex flex-col justify-center">
+                <p class="text-[11px] text-slate-400 leading-relaxed">Tekan tombol ini jika tanggal rekaman berhenti, mundur, atau tidak sama dengan waktu nyata. Server akan mencoba <b class="text-slate-300">id.pool.ntp.org</b>, NTP cadangan, lalu HTTP Date fallback. Sinkronisasi juga berjalan otomatis saat boot dan setiap 30 menit.</p>
+                <button id="btn-time-sync" onclick="handleAdminSyncTime()" class="self-start bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition border-0 cursor-pointer flex items-center space-x-1.5 shadow-md">
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                  <span>Sinkronkan Tanggal Sekarang</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Cache and RAM Cleaner Panel -->

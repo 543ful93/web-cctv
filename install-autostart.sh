@@ -18,7 +18,11 @@ echo
 # 1. dep
 echo "[1/7] Install dependencies..."
 apt-get update -y
-apt-get install -y nodejs npm ffmpeg sqlite3 rsync
+apt-get install -y nodejs npm ffmpeg sqlite3 rsync ntpdate
+
+# HG680P tidak memiliki RTC: tetapkan WIB dan sinkronkan segera setelah jaringan aktif.
+timedatectl set-timezone Asia/Jakarta 2>/dev/null || ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+ntpdate -u -b id.pool.ntp.org 2>/dev/null || true
 
 # 2. copy app
 echo "[2/7] Copy aplikasi ke $APP_DIR ..."
@@ -63,6 +67,8 @@ PORT=3000
 JWT_SECRET=cctv_hg680p_secret_ganti_ini_please
 DB_PATH=/var/lib/webcctv/cctv.db
 RECORD_DIR=/var/lib/webcctv/records
+TIMEZONE=Asia/Jakarta
+TZ=Asia/Jakarta
 VIDEO_SIZE=960x540
 VIDEO_FPS=15
 VIDEO_BITRATE=800k

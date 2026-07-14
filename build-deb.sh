@@ -20,7 +20,7 @@ Section: net
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: WebCCTV <cctv@local>
-Depends: nodejs (>= 16), ffmpeg
+Depends: nodejs (>= 16), ffmpeg, ntpdate
 Description: Web-CCTV HG680P - H.265 to H.264 HLS Transcode + Recorder
  Modern CCTV web UI for Armbian STB HG680P.
  Includes RTSP to HLS, recording scheduler, OSM map, role login.
@@ -57,7 +57,8 @@ mkdir -p .debbuild/etc/systemd/system
 cat > .debbuild/etc/systemd/system/webcctv.service <<'EOF'
 [Unit]
 Description=Web CCTV HG680P
-After=network.target
+Wants=network-online.target
+After=network-online.target local-fs.target
 
 [Service]
 Type=simple
@@ -65,6 +66,8 @@ WorkingDirectory=/opt/webcctv
 Environment=NODE_ENV=production
 Environment=PORT=3000
 Environment=DB_PATH=/var/lib/webcctv/cctv.db
+Environment=TIMEZONE=Asia/Jakarta
+Environment=TZ=Asia/Jakarta
 ExecStartPre=/usr/bin/node /opt/webcctv/init-db.js
 ExecStart=/usr/bin/node /opt/webcctv/server.js
 Restart=always
@@ -80,6 +83,8 @@ PORT=3000
 JWT_SECRET=cctv_hg680p_secret_ganti_ini
 DB_PATH=/var/lib/webcctv/cctv.db
 RECORD_DIR=/var/lib/webcctv/records
+TIMEZONE=Asia/Jakarta
+TZ=Asia/Jakarta
 VIDEO_SIZE=960x540
 VIDEO_FPS=15
 VIDEO_BITRATE=800k

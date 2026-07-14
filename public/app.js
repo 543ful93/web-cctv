@@ -335,11 +335,16 @@ let hlsInGridInstances = new Map(); // keep track of grid HLS instances
 let liveGridInterval = null;
 let snapshotInterval = null;
 let dashboardClockInterval = null;
+let serverClockEpochMs = null;
+let serverClockFetchedAt = 0;
+let serverClockTimezone = 'Asia/Jakarta';
+let serverClockStatus = null;
 let playerUptimeInterval = null;
 let activeLogInterval = null;
 let isRecordingActive = false;
 let recordTimerInterval = null;
 let recordTimerSec = 0;
+let recordPageTimerInterval = null;
 
 // ================= INITIALIZATION =================
 document.addEventListener("DOMContentLoaded", () => {
@@ -597,6 +602,8 @@ function navigateToView(viewId) {
   // Cleanup periodic intervals
   clearInterval(liveGridInterval);
   clearInterval(snapshotInterval);
+  clearInterval(recordPageTimerInterval);
+  recordPageTimerInterval = null;
   cleanupAllHlsInGrid();
   if (activePopupHls) {
     activePopupHls.destroy();
@@ -638,16 +645,23 @@ function navigateToView(viewId) {
     loadRecordsAndCamerasFilter();
     loadActiveRecordings();
     loadStorageStatus();
-    // Poll active recordings, storage space, and files list every 5 seconds for full real-time updates!
+    startRecordPageRealtimeTicker();
+    // Poll data fisik tiap 5 detik, sedangkan timer visual bergerak lokal tiap 1 detik.
+    // Pola ini menjaga UI real-time tanpa membebani CPU/HDD STB.
+    let recordPollCount = 0;
     liveGridInterval = setInterval(() => {
       loadActiveRecordings();
-      loadStorageStatus();
       loadRecords();
+      // Pemindaian seluruh ukuran HDD lebih berat; cukup setiap 30 detik.
+      recordPollCount++;
+      if (recordPollCount % 6 === 0) loadStorageStatus();
     }, 5000);
   } else if (viewId === "cameras") {
     loadAdminCameras();
   } else if (viewId === "users") {
     loadAdminUsers();
+  } else if (viewId === "settings") {
+    loadSystemTimeStatus();
   }
 }
 
@@ -678,18 +692,120 @@ function toggleMobileSidebar() {
   }
 }
 
-// ================= CLOCK =================
+// ================= CLOCK (SUMBER TUNGGAL: JAM SERVER/STB) =================
+function estimatedServerNow() {
+  if (!Number.isFinite(serverClockEpochMs)) return new Date();
+  return new Date(serverClockEpochMs + (performance.now() - serverClockFetchedAt));
+}
+
+function formatServerClock(date, includeDate = true) {
+  const options = {
+    timeZone: serverClockTimezone || 'Asia/Jakarta',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  };
+  if (includeDate) {
+    options.day = '2-digit';
+    options.month = '2-digit';
+    options.year = 'numeric';
+  }
+  return date.toLocaleString(currentLanguage === 'id' ? 'id-ID' : 'en-GB', options);
+}
+
+function paintSystemTimeStatus(data = serverClockStatus) {
+  if (!data) return;
+  const currentText = `${formatServerClock(estimatedServerNow(), true)} ${data.timezone_label || 'WIB'}`;
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = value;
+  };
+
+  setText('sys-record-time', `${formatServerClock(estimatedServerNow(), false)} ${data.timezone_label || 'WIB'}`);
+  setText('time-sync-current', currentText);
+  setText('time-sync-zone', `${data.timezone || 'Asia/Jakarta'} (${data.timezone_label || 'WIB'})`);
+
+  const dashStatus = document.getElementById('sys-time-sync');
+  const panelStatus = document.getElementById('time-sync-status');
+  let statusText = 'NTP belum sinkron';
+  let statusClass = 'text-[9px] text-amber-400 block';
+  let panelClass = 'px-2 py-1 rounded bg-amber-500/10 text-amber-400';
+
+  if (data.in_progress) {
+    statusText = 'Sedang sinkronisasi...';
+    statusClass = 'text-[9px] text-blue-400 block animate-pulse';
+    panelClass = 'px-2 py-1 rounded bg-blue-500/10 text-blue-400 animate-pulse';
+  } else if (data.synced && data.valid) {
+    statusText = 'NTP sinkron';
+    statusClass = 'text-[9px] text-emerald-400 block';
+    panelClass = 'px-2 py-1 rounded bg-emerald-500/10 text-emerald-400';
+  } else if (!data.valid) {
+    statusText = 'Tanggal tidak valid';
+    statusClass = 'text-[9px] text-red-400 block animate-pulse';
+    panelClass = 'px-2 py-1 rounded bg-red-500/10 text-red-400 animate-pulse';
+  }
+
+  if (dashStatus) {
+    dashStatus.className = statusClass;
+    dashStatus.innerText = statusText;
+  }
+  if (panelStatus) {
+    panelStatus.className = panelClass;
+    panelStatus.innerText = statusText;
+  }
+
+  let lastSyncText = '';
+  if (data.last_success_at) {
+    const parsed = new Date(data.last_success_at);
+    if (!Number.isNaN(parsed.getTime())) lastSyncText = ` • Sinkron terakhir: ${formatServerClock(parsed, true)} ${data.timezone_label || 'WIB'}`;
+  }
+  const detail = data.error
+    ? `Gagal terakhir: ${data.error}`
+    : `Sumber: ${data.source || 'system-clock'}${lastSyncText}`;
+  setText('time-sync-detail', detail);
+}
+
+async function refreshServerClock() {
+  try {
+    const token = safeStorage.getItem('token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const response = await fetch('/api/system/time', { headers, cache: 'no-store' });
+    if (!response.ok) throw new Error('Status jam server tidak tersedia');
+    const data = await response.json();
+    serverClockEpochMs = Number(data.epoch_ms);
+    serverClockFetchedAt = performance.now();
+    serverClockTimezone = data.timezone || 'Asia/Jakarta';
+    serverClockStatus = data;
+    paintSystemTimeStatus(data);
+    return data;
+  } catch (err) {
+    console.warn('Gagal membaca jam STB:', err.message);
+    return null;
+  }
+}
+
 function startDashboardClock() {
   if (dashboardClockInterval) clearInterval(dashboardClockInterval);
-  dashboardClockInterval = setInterval(() => {
-    const clockEl = document.getElementById("dash-clock");
-    if (clockEl) {
-      const now = new Date();
-      clockEl.querySelector("span").innerText = now.toLocaleString(currentLanguage === 'id' ? 'id-ID' : 'en-US', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-      });
+  refreshServerClock();
+  let ticks = 0;
+
+  const renderClock = () => {
+    const now = estimatedServerNow();
+    const clockEl = document.getElementById('dash-clock');
+    if (clockEl && clockEl.querySelector('span')) {
+      clockEl.querySelector('span').innerText = `${formatServerClock(now, true)} ${serverClockStatus?.timezone_label || 'WIB'}`;
     }
-  }, 1000);
+    paintSystemTimeStatus();
+    ticks++;
+    if (ticks % 60 === 0 || (!serverClockStatus?.synced && ticks % 5 === 0)) {
+      refreshServerClock();
+    }
+  };
+
+  renderClock();
+  dashboardClockInterval = setInterval(renderClock, 1000);
+}
+
+async function loadSystemTimeStatus() {
+  return refreshServerClock();
 }
 
 // ================= VIEW: DASHBOARD =================
@@ -1395,6 +1511,32 @@ async function loadRecordsAndCamerasFilter() {
   }
 }
 
+function formatRecordingElapsed(totalSeconds) {
+  const safeSeconds = Math.max(0, parseInt(totalSeconds, 10) || 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function startRecordPageRealtimeTicker() {
+  clearInterval(recordPageTimerInterval);
+  recordPageTimerInterval = setInterval(() => {
+    document.querySelectorAll('[data-record-elapsed]').forEach(el => {
+      const next = (parseInt(el.dataset.recordElapsed, 10) || 0) + 1;
+      el.dataset.recordElapsed = String(next);
+      el.innerText = formatRecordingElapsed(next);
+    });
+    document.querySelectorAll('[data-record-remaining]').forEach(el => {
+      const next = Math.max(0, (parseInt(el.dataset.recordRemaining, 10) || 0) - 1);
+      el.dataset.recordRemaining = String(next);
+      el.innerText = `sisa ${formatRecordingElapsed(next)}`;
+    });
+  }, 1000);
+}
+
 async function loadRecords() {
   const filterEl = document.getElementById("records-filter-camera");
   const selectedCam = filterEl ? filterEl.value : "";
@@ -1447,8 +1589,13 @@ async function loadRecords() {
           `<span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 animate-pulse capitalize">Recording</span>` :
           `<span class="px-2 py-0.5 rounded bg-red-500/10 text-red-400 capitalize">Failed</span>`);
 
-      const durStr = rec.duration_sec ? `${rec.duration_sec}s` : "--";
-      const sizeStr = rec.size_mb ? `${rec.size_mb} MB` : "--";
+      const liveElapsed = Math.max(0, parseInt(rec.duration_sec, 10) || 0);
+      const durStr = rec.status === 'recording'
+        ? `<span data-record-elapsed="${liveElapsed}" class="font-mono text-rose-400">${formatRecordingElapsed(liveElapsed)}</span>`
+        : (rec.duration_sec ? formatRecordingElapsed(rec.duration_sec) : "--");
+      const sizeStr = rec.size_mb !== null && rec.size_mb !== undefined
+        ? `${Number(rec.size_mb).toFixed(2)} MB`
+        : "--";
 
       const tr = document.createElement("tr");
       tr.className = "hover:bg-slate-800/40 transition duration-150 text-xs";
@@ -1852,46 +1999,41 @@ async function handleForceStopStream() {
 async function checkPlayerRecordingStatus(cameraId) {
   try {
     const token = safeStorage.getItem("token");
-    const headers = { "Authorization": `Bearer ${token}` };
-    const res = await fetch("/api/dashboard", { headers });
-    const stats = await res.json();
-    
-    const resRecs = await fetch("/api/records", { headers });
-    const recs = await resRecs.json();
-    const activeThisCam = recs.find(r => r.camera_id === cameraId && r.status === 'recording');
+    const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+    const response = await fetch("/api/record/active", { headers });
+    const activeRecords = await response.json();
+    const activeThisCam = Array.isArray(activeRecords)
+      ? activeRecords.find(record => Number(record.camera_id) === Number(cameraId))
+      : null;
 
-    if (activeThisCam) {
-      setRecordingStateActive(true);
-    } else {
-      setRecordingStateActive(false);
-    }
+    setRecordingStateActive(Boolean(activeThisCam), activeThisCam?.elapsed_sec || 0);
   } catch (err) {
     console.error("Recording status check error:", err);
   }
 }
 
-function setRecordingStateActive(active) {
+function setRecordingStateActive(active, initialElapsedSec = 0) {
   isRecordingActive = active;
   clearInterval(recordTimerInterval);
 
   const nonAct = document.getElementById("rec-not-active");
   const act = document.getElementById("rec-active");
+  const timerEl = document.getElementById("rec-active-timer");
 
   if (active) {
     if (nonAct) nonAct.classList.add("hidden");
     if (act) act.classList.remove("hidden");
-    
-    recordTimerSec = 0;
+
+    recordTimerSec = Math.max(0, parseInt(initialElapsedSec, 10) || 0);
+    if (timerEl) timerEl.innerText = formatRecordingElapsed(recordTimerSec);
     recordTimerInterval = setInterval(() => {
       recordTimerSec++;
-      const m = String(Math.floor(recordTimerSec / 60)).padStart(2,'0');
-      const s = String(recordTimerSec % 60).padStart(2,'0');
-      const timerEl = document.getElementById("rec-active-timer");
-      if (timerEl) timerEl.innerText = `${m}:${s}`;
+      if (timerEl) timerEl.innerText = formatRecordingElapsed(recordTimerSec);
     }, 1000);
   } else {
     if (nonAct) nonAct.classList.remove("hidden");
     if (act) act.classList.add("hidden");
+    if (timerEl) timerEl.innerText = "--:--";
   }
 }
 
@@ -2011,13 +2153,21 @@ async function loadActiveRecordings() {
     listEl.innerHTML = "";
 
     list.forEach(item => {
+      const elapsed = Math.max(0, parseInt(item.elapsed_sec, 10) || 0);
+      const remaining = Math.max(0, parseInt(item.remaining_sec, 10) || 0);
       const row = document.createElement("div");
-      row.className = "flex items-center justify-between py-2 text-xs border-b border-slate-800 last:border-0";
+      row.className = "flex items-center justify-between gap-3 py-2 text-xs border-b border-slate-800 last:border-0";
       row.innerHTML = `
-        <div class="flex items-center space-x-2 overflow-hidden">
+        <div class="flex items-center space-x-2 overflow-hidden min-w-0">
           <span class="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse flex-shrink-0"></span>
-          <span class="font-bold text-slate-200 truncate block max-w-[150px]">${item.camera_name}</span>
-          <span class="text-slate-400 text-[10px] hidden sm:inline">(ID: ${item.camera_id})</span>
+          <div class="min-w-0">
+            <span class="font-bold text-slate-200 truncate block">${item.camera_name}</span>
+            <span class="text-[10px] text-slate-400 flex flex-wrap gap-x-1.5">
+              <span data-record-elapsed="${elapsed}" class="font-mono text-rose-400">${formatRecordingElapsed(elapsed)}</span>
+              <span>• ${Number(item.size_mb || 0).toFixed(2)} MB</span>
+              <span data-record-remaining="${remaining}" class="hidden sm:inline">sisa ${formatRecordingElapsed(remaining)}</span>
+            </span>
+          </div>
         </div>
         <button onclick="stopRecordingFromPage(${item.camera_id})" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-2.5 py-1 rounded text-[10px] transition border-0 cursor-pointer shadow flex-shrink-0">
           Stop Rec
@@ -3003,6 +3153,37 @@ function stopQrCodeScanner() {
       console.warn("Error stopping QR Scanner:", err);
     });
     html5QrReader = null;
+  }
+}
+
+// ================= SINKRONISASI TANGGAL/JAM STB =================
+async function handleAdminSyncTime() {
+  const button = document.getElementById('btn-time-sync');
+  if (button) button.disabled = true;
+  showLoader('Menyinkronkan tanggal STB dengan server NTP Indonesia...');
+
+  const token = safeStorage.getItem('token');
+  try {
+    const response = await fetch('/api/admin/time-sync', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Sinkronisasi NTP gagal. Periksa internet STB.');
+    }
+
+    await refreshServerClock();
+    showToast(`Tanggal berhasil sinkron: ${data.local_time} ${data.timezone_label || 'WIB'}`, 'success');
+  } catch (err) {
+    await refreshServerClock();
+    showToast(err.message, 'error');
+  } finally {
+    if (button) button.disabled = false;
+    hideLoader();
   }
 }
 

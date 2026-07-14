@@ -15,6 +15,8 @@ RUN node init-db.js || true
 
 ENV PORT=3000 \
     DB_PATH=/data/cctv.db \
+    TIMEZONE=Asia/Jakarta \
+    TZ=Asia/Jakarta \
     VIDEO_SIZE=960x540 \
     VIDEO_FPS=15 \
     VIDEO_BITRATE=800k \
